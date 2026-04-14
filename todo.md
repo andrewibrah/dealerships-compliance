@@ -47,19 +47,19 @@
 - [x] Create transactional email templates
 
 ## Phase 6: Dashboard + Email (Days 7-8)
-- [ ] Build dashboard with compliance overview
-- [ ] Add compliance score visualization
-- [ ] Create gap report summary
-- [ ] Implement email reminder scheduling
-- [ ] Add FTC urgency banner with regulatory deadlines
-- [ ] Create compliance status indicators
-- [ ] Build section progress cards
+- [x] Build dashboard with compliance overview
+- [x] Add compliance score visualization
+- [x] Create gap report summary
+- [x] Implement email reminder scheduling
+- [x] Add FTC urgency banner with regulatory deadlines
+- [x] Create compliance status indicators
+- [x] Build section progress cards
 
 ## Phase 7: Landing Page + Deploy (Days 8-9)
-- [ ] Enhance landing page with feature highlights
-- [ ] Add social proof section
-- [ ] Create FAQ section
-- [ ] Add pricing section to landing page
+- [x] Enhance landing page with feature highlights
+- [x] Add social proof section
+- [x] Create FAQ section
+- [x] Add pricing section to landing page
 - [ ] Configure domain and SSL
 - [ ] Deploy to Vercel
 - [ ] Set up monitoring and analytics
