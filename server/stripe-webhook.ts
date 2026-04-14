@@ -1,7 +1,19 @@
 import Stripe from "stripe";
 import * as db from "./db";
 
-const stripe = new Stripe(process.env.STRIPE_SECRET_KEY || "");
+// Lazy initialize Stripe to avoid errors when API key is not set
+let stripeInstance: Stripe | null = null;
+
+function getStripe(): Stripe {
+  if (!stripeInstance) {
+    const apiKey = process.env.STRIPE_SECRET_KEY;
+    if (!apiKey) {
+      throw new Error("STRIPE_SECRET_KEY environment variable is not set");
+    }
+    stripeInstance = new Stripe(apiKey);
+  }
+  return stripeInstance;
+}
 
 export async function handleStripeWebhook(event: Stripe.Event) {
   switch (event.type) {
@@ -47,7 +59,7 @@ export async function handleStripeWebhook(event: Stripe.Event) {
       const subscriptionId = (invoice as any).subscription as string;
 
       if (subscriptionId) {
-        const subscription = await stripe.subscriptions.retrieve(subscriptionId);
+        const subscription = await getStripe().subscriptions.retrieve(subscriptionId);
         const dealershipId = subscription.metadata?.dealershipId;
 
         if (dealershipId) {
@@ -64,7 +76,7 @@ export async function handleStripeWebhook(event: Stripe.Event) {
       const subscriptionId = (invoice as any).subscription as string;
 
       if (subscriptionId) {
-        const subscription = await stripe.subscriptions.retrieve(subscriptionId);
+        const subscription = await getStripe().subscriptions.retrieve(subscriptionId);
         const dealershipId = subscription.metadata?.dealershipId;
 
         if (dealershipId) {
@@ -84,7 +96,7 @@ export function verifyStripeSignature(
   secret: string
 ): Stripe.Event | null {
   try {
-    return stripe.webhooks.constructEvent(body, signature, secret);
+    return getStripe().webhooks.constructEvent(body, signature, secret);
   } catch (err) {
     console.error("Webhook signature verification failed:", err);
     return null;

@@ -3,7 +3,19 @@ import { z } from "zod";
 import Stripe from "stripe";
 import * as db from "./db";
 
-const stripe = new Stripe(process.env.STRIPE_SECRET_KEY || "");
+// Lazy initialize Stripe to avoid errors when API key is not set
+let stripeInstance: Stripe | null = null;
+
+function getStripe(): Stripe {
+  if (!stripeInstance) {
+    const apiKey = process.env.STRIPE_SECRET_KEY;
+    if (!apiKey) {
+      throw new Error("STRIPE_SECRET_KEY environment variable is not set");
+    }
+    stripeInstance = new Stripe(apiKey);
+  }
+  return stripeInstance;
+}
 
 // Stripe price IDs from environment
 const CORE_PRICE_ID = process.env.STRIPE_CORE_PRICE_ID || "";
@@ -25,7 +37,7 @@ export const stripeRouter = router({
       let customerId = subscription?.stripeCustomerId;
 
       if (!customerId) {
-        const customer = await stripe.customers.create({
+        const customer = await getStripe().customers.create({
           email: ctx.user.email || undefined,
           name: dealership.name,
           metadata: {
@@ -37,7 +49,7 @@ export const stripeRouter = router({
       }
 
       // Create checkout session
-      const session = await stripe.checkout.sessions.create({
+      const session = await getStripe().checkout.sessions.create({
         customer: customerId,
         line_items: [
           {
@@ -93,7 +105,7 @@ export const stripeRouter = router({
     }
 
     // Cancel at Stripe
-    await stripe.subscriptions.update(subscription.stripeSubscriptionId, {
+    await getStripe().subscriptions.update(subscription.stripeSubscriptionId, {
       cancel_at_period_end: true,
     });
 
@@ -118,7 +130,7 @@ export const stripeRouter = router({
       }
 
       // Update payment method at Stripe
-      await stripe.subscriptions.update(subscription.stripeSubscriptionId, {
+      await getStripe().subscriptions.update(subscription.stripeSubscriptionId, {
         default_payment_method: input.paymentMethodId,
       });
 
@@ -135,7 +147,7 @@ export const stripeRouter = router({
       throw new Error("No Stripe customer found");
     }
 
-    const session = await stripe.billingPortal.sessions.create({
+    const session = await getStripe().billingPortal.sessions.create({
       customer: subscription.stripeCustomerId,
       return_url: `${process.env.VITE_APP_URL}/dashboard`,
     });
