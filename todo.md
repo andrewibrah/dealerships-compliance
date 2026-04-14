@@ -60,8 +60,9 @@
 - [x] Add social proof section
 - [x] Create FAQ section
 - [x] Add pricing section to landing page
+- [x] Fix Stripe initialization for deployment
 - [ ] Configure domain and SSL
-- [ ] Deploy to Vercel
+- [ ] Deploy to production
 - [ ] Set up monitoring and analytics
 - [ ] Create deployment documentation
 

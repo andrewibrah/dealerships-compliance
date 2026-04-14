@@ -81,6 +81,14 @@ export const appRouter = router({
 
   // Compliance answers
   compliance: router({
+    // Get all answers for a dealership (alias for Wizard)
+    getAnswers: protectedProcedure.query(async ({ ctx }) => {
+      const dealership = await db.getDealershipByUserId(ctx.user.id);
+      if (!dealership) return [];
+
+      return await db.getAllComplianceAnswers(dealership.id);
+    }),
+
     // Get all answers for a dealership
     getAll: protectedProcedure.query(async ({ ctx }) => {
       const dealership = await db.getDealershipByUserId(ctx.user.id);
@@ -97,6 +105,29 @@ export const appRouter = router({
         if (!dealership) return null;
 
         return await db.getComplianceAnswers(dealership.id, input.section);
+      }),
+
+    // Save a single answer (called from Wizard)
+    saveAnswer: protectedProcedure
+      .input(
+        z.object({
+          section: z.number(),
+          sectionName: z.string(),
+          answers: z.record(z.string(), z.any()),
+        })
+      )
+      .mutation(async ({ ctx, input }) => {
+        const dealership = await db.getDealershipByUserId(ctx.user.id);
+        if (!dealership) throw new Error("No dealership found");
+
+        await db.saveComplianceAnswer({
+          dealershipId: dealership.id,
+          section: input.section,
+          sectionName: input.sectionName,
+          answers: input.answers,
+        });
+
+        return { success: true };
       }),
 
     // Save answers for a section

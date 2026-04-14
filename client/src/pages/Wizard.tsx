@@ -1,23 +1,57 @@
-import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { Progress } from "@/components/ui/progress";
+import { Button } from "@/components/ui/button";
 import { useState, useEffect } from "react";
 import { useLocation } from "wouter";
 import { SAFEGUARDS_SECTIONS, type Section, type Question } from "@/data/safeguards-questions";
 import { calculateSectionScore, calculateOverallScore } from "@/lib/scoring";
-import { AlertCircle, CheckCircle2, AlertTriangle } from "lucide-react";
+import { AlertCircle, CheckCircle2, AlertTriangle, Loader2 } from "lucide-react";
+import { trpc } from "@/lib/trpc";
+import { useAuth } from "@/hooks/useAuth";
+import { toast } from "sonner";
 
 export default function Wizard() {
   const [, setLocation] = useLocation();
+  const { user, isAuthenticated } = useAuth();
   const [currentSection, setCurrentSection] = useState(0);
   const [answers, setAnswers] = useState<Record<number, Record<string, any>>>({});
   const [sectionScores, setSectionScores] = useState<Record<number, number>>({});
   const [overallScore, setOverallScore] = useState(0);
   const [riskLevel, setRiskLevel] = useState<"critical" | "high" | "medium" | "low">("critical");
+  const [isSaving, setIsSaving] = useState(false);
 
   const totalSections = SAFEGUARDS_SECTIONS.length;
   const progress = ((currentSection + 1) / totalSections) * 100;
   const section = SAFEGUARDS_SECTIONS[currentSection];
+
+  // Load existing answers from database
+  const { data: existingAnswers, isLoading: isLoadingAnswers } = trpc.compliance.getAnswers.useQuery(
+    undefined,
+    { enabled: isAuthenticated }
+  );
+
+  // Initialize answers from database on load
+  useEffect(() => {
+    if (existingAnswers) {
+      const groupedAnswers: Record<number, Record<string, any>> = {};
+      existingAnswers.forEach((answer) => {
+        if (!groupedAnswers[answer.section]) {
+          groupedAnswers[answer.section] = {};
+        }
+        // answers is a JSON object with questionId: value pairs
+        const answersData = answer.answers as Record<string, any>;
+        Object.assign(groupedAnswers[answer.section], answersData);
+      });
+      setAnswers(groupedAnswers);
+    }
+  }, [existingAnswers]);
+
+  // Save answer mutation
+  const saveAnswerMutation = trpc.compliance.saveAnswer.useMutation({
+    onError: (error: any) => {
+      toast.error("Failed to save answer: " + error.message);
+    },
+  });
 
   // Calculate scores whenever answers change
   useEffect(() => {
@@ -44,7 +78,13 @@ export default function Wizard() {
     }
   }, [answers]);
 
-  const handleAnswer = (questionId: string, value: any) => {
+  const handleAnswer = async (questionId: string, value: any) => {
+    if (!isAuthenticated) {
+      toast.error("Please log in to save your answers");
+      return;
+    }
+
+    // Update local state immediately
     setAnswers((prev) => ({
       ...prev,
       [currentSection]: {
@@ -52,6 +92,20 @@ export default function Wizard() {
         [questionId]: value,
       },
     }));
+
+    // Save to database
+    try {
+      await saveAnswerMutation.mutateAsync({
+        section: currentSection,
+        sectionName: section.name,
+        answers: {
+          ...answers[currentSection],
+          [questionId]: value,
+        },
+      });
+    } catch (error) {
+      console.error("Failed to save answer:", error);
+    }
   };
 
   const getRiskColor = () => {
@@ -80,244 +134,262 @@ export default function Wizard() {
       case "low":
         return "bg-green-950/30 border-green-600";
       default:
-        return "bg-slate-800 border-slate-700";
+        return "bg-slate-900/30 border-slate-600";
     }
   };
+
+  if (!isAuthenticated) {
+    return (
+      <div className="min-h-screen bg-gradient-to-br from-slate-900 via-slate-800 to-slate-900 flex items-center justify-center">
+        <Card className="bg-slate-800 border-slate-700 p-8 max-w-md">
+          <h2 className="text-2xl font-bold text-white mb-4">Sign In Required</h2>
+          <p className="text-slate-300 mb-6">
+            You need to be logged in to access the compliance wizard.
+          </p>
+          <Button
+            className="w-full bg-amber-600 hover:bg-amber-700"
+            onClick={() => setLocation("/login")}
+          >
+            Go to Login
+          </Button>
+        </Card>
+      </div>
+    );
+  }
+
+  if (isLoadingAnswers) {
+    return (
+      <div className="min-h-screen bg-gradient-to-br from-slate-900 via-slate-800 to-slate-900 flex items-center justify-center">
+        <div className="text-center">
+          <Loader2 className="animate-spin text-amber-500 mx-auto mb-4" size={40} />
+          <p className="text-slate-300">Loading your compliance data...</p>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-slate-900 via-slate-800 to-slate-900">
       {/* Header */}
-      <div className="border-b border-slate-700 bg-slate-900/50 backdrop-blur">
+      <div className="border-b border-slate-700 bg-slate-900/50 backdrop-blur sticky top-0 z-40">
         <div className="container mx-auto px-4 py-6">
-          <h1 className="text-3xl font-bold text-white mb-2">FTC Safeguards Compliance Wizard</h1>
-          <p className="text-slate-400">
-            Section {currentSection + 1} of {totalSections}: {section.name}
-          </p>
-        </div>
-      </div>
-
-      {/* Progress Bar */}
-      <div className="border-b border-slate-700 bg-slate-900/30">
-        <div className="container mx-auto px-4 py-4">
+          <div className="flex items-center justify-between mb-4">
+            <div>
+              <h1 className="text-3xl font-bold text-white">FTC Safeguards Compliance Wizard</h1>
+              <p className="text-slate-400">Section {currentSection + 1} of {totalSections}</p>
+            </div>
+            <div className="text-right">
+              <div className={`text-3xl font-bold ${getRiskColor()}`}>
+                {overallScore.toFixed(0)}%
+              </div>
+              <p className="text-slate-400 text-sm">Overall Compliance</p>
+            </div>
+          </div>
           <Progress value={progress} className="h-2" />
-          <p className="text-sm text-slate-400 mt-2">
-            {Math.round(progress)}% Complete
-          </p>
         </div>
       </div>
 
       {/* Main Content */}
-      <div className="container mx-auto px-4 py-12">
-        <div className="grid gap-8 lg:grid-cols-4">
-          {/* Left Sidebar - Section Navigation */}
-          <div className="lg:col-span-1">
-            <div className="sticky top-8 space-y-2">
-              {SAFEGUARDS_SECTIONS.map((sec, index) => {
-                const score = sectionScores[sec.number] || 0;
-                const isComplete = score > 0;
-
-                return (
-                  <button
-                    key={sec.number}
-                    onClick={() => setCurrentSection(index)}
-                    className={`w-full text-left px-4 py-3 rounded-lg transition-all ${
-                      index === currentSection
-                        ? "bg-amber-600 text-white font-semibold ring-2 ring-amber-400"
-                        : isComplete
-                          ? "bg-slate-700 text-slate-200 hover:bg-slate-600"
-                          : "bg-slate-800 text-slate-400 hover:bg-slate-700"
-                    }`}
-                  >
-                    <div className="flex items-center justify-between">
-                      <div className="text-sm">
-                        <div className="font-semibold">{sec.number}. {sec.name}</div>
-                        {isComplete && <div className="text-xs mt-1">{score}%</div>}
-                      </div>
-                      {isComplete && <CheckCircle2 size={16} />}
-                    </div>
-                  </button>
-                );
-              })}
-            </div>
-          </div>
-
-          {/* Main Content Area */}
-          <div className="lg:col-span-3 space-y-6">
-            {/* Overall Score Card */}
-            <Card className={`border-2 p-6 ${getRiskBgColor()}`}>
-              <div className="flex items-center justify-between">
-                <div>
-                  <h3 className="text-sm font-semibold text-slate-300 mb-2">Overall Compliance Score</h3>
-                  <div className="flex items-baseline gap-2">
-                    <div className={`text-4xl font-bold ${getRiskColor()}`}>{overallScore}%</div>
-                    <div className="text-sm text-slate-400 capitalize">{riskLevel} Risk</div>
-                  </div>
-                </div>
-                {riskLevel === "critical" && <AlertTriangle className={getRiskColor()} size={32} />}
-                {riskLevel === "high" && <AlertCircle className={getRiskColor()} size={32} />}
-                {riskLevel === "low" && <CheckCircle2 className={getRiskColor()} size={32} />}
-              </div>
-            </Card>
-
-            {/* Section Content */}
+      <div className="container mx-auto px-4 py-8">
+        <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
+          {/* Questions */}
+          <div className="lg:col-span-2">
             <Card className="bg-slate-800 border-slate-700 p-8">
-              <div className="mb-8">
-                <h2 className="text-2xl font-bold text-white mb-2">{section.name}</h2>
-                <p className="text-slate-300">{section.description}</p>
-                <div className="mt-4">
-                  <div className="text-sm text-slate-400 mb-2">Section Score</div>
-                  <div className="flex items-center gap-3">
-                    <Progress value={sectionScores[section.number] || 0} className="flex-1 h-2" />
-                    <span className="text-lg font-bold text-amber-500 min-w-fit">
-                      {sectionScores[section.number] || 0}%
-                    </span>
-                  </div>
-                </div>
-              </div>
+              <h2 className="text-2xl font-bold text-white mb-2">{section.name}</h2>
+              <p className="text-slate-400 mb-8">{section.description}</p>
 
-              {/* Questions */}
               <div className="space-y-8">
                 {section.questions.map((question) => (
-                  <QuestionComponent
-                    key={question.id}
-                    question={question}
-                    value={answers[currentSection]?.[question.id]}
-                    onChange={(value) => handleAnswer(question.id, value)}
-                  />
+                  <div key={question.id} className="border-b border-slate-700 pb-8 last:border-0">
+                    <div className="flex items-start gap-4 mb-4">
+                      <div className="flex-1">
+                        <label className="text-white font-medium block mb-2">
+                          {question.text}
+                        </label>
+                        {question.hint && (
+                          <p className="text-sm text-slate-400 mb-4">{question.hint}</p>
+                        )}
+                      </div>
+                      <div
+                        className={`px-2 py-1 rounded text-xs font-semibold whitespace-nowrap ${
+                          question.weight === "critical"
+                            ? "bg-red-900/50 text-red-200"
+                            : question.weight === "important"
+                              ? "bg-orange-900/50 text-orange-200"
+                              : "bg-yellow-900/50 text-yellow-200"
+                        }`}
+                      >
+                        {question.weight}
+                      </div>
+                    </div>
+
+                    {question.type === "yes_no" && (
+                      <div className="flex gap-4">
+                        <Button
+                          variant={answers[currentSection]?.[question.id] === "yes" ? "default" : "outline"}
+                          className={
+                            answers[currentSection]?.[question.id] === "yes"
+                              ? "bg-green-600 hover:bg-green-700"
+                              : ""
+                          }
+                          onClick={() => handleAnswer(question.id, "yes")}
+                          disabled={isSaving}
+                        >
+                          Yes
+                        </Button>
+                        <Button
+                          variant={answers[currentSection]?.[question.id] === "no" ? "default" : "outline"}
+                          className={
+                            answers[currentSection]?.[question.id] === "no"
+                              ? "bg-red-600 hover:bg-red-700"
+                              : ""
+                          }
+                          onClick={() => handleAnswer(question.id, "no")}
+                          disabled={isSaving}
+                        >
+                          No
+                        </Button>
+                      </div>
+                    )}
+
+                    {question.type === "yes_no_partial" && (
+                      <div className="flex gap-4">
+                        <Button
+                          variant={answers[currentSection]?.[question.id] === "yes" ? "default" : "outline"}
+                          className={
+                            answers[currentSection]?.[question.id] === "yes"
+                              ? "bg-green-600 hover:bg-green-700"
+                              : ""
+                          }
+                          onClick={() => handleAnswer(question.id, "yes")}
+                          disabled={isSaving}
+                        >
+                          Yes
+                        </Button>
+                        <Button
+                          variant={answers[currentSection]?.[question.id] === "partial" ? "default" : "outline"}
+                          className={
+                            answers[currentSection]?.[question.id] === "partial"
+                              ? "bg-yellow-600 hover:bg-yellow-700"
+                              : ""
+                          }
+                          onClick={() => handleAnswer(question.id, "partial")}
+                          disabled={isSaving}
+                        >
+                          Partial
+                        </Button>
+                        <Button
+                          variant={answers[currentSection]?.[question.id] === "no" ? "default" : "outline"}
+                          className={
+                            answers[currentSection]?.[question.id] === "no"
+                              ? "bg-red-600 hover:bg-red-700"
+                              : ""
+                          }
+                          onClick={() => handleAnswer(question.id, "no")}
+                          disabled={isSaving}
+                        >
+                          No
+                        </Button>
+                      </div>
+                    )}
+
+                    {question.type === "text" && (
+                      <textarea
+                        className="w-full bg-slate-900 border border-slate-600 rounded px-3 py-2 text-white placeholder-slate-500"
+                        placeholder="Enter your response..."
+                        value={answers[currentSection]?.[question.id] || ""}
+                        onChange={(e) => handleAnswer(question.id, e.target.value)}
+                        rows={3}
+                        disabled={isSaving}
+                      />
+                    )}
+                  </div>
                 ))}
-              </div>
-
-              {/* Navigation Buttons */}
-              <div className="mt-12 flex justify-between">
-                <Button
-                  onClick={() => setCurrentSection(Math.max(0, currentSection - 1))}
-                  variant="outline"
-                  disabled={currentSection === 0}
-                >
-                  Previous Section
-                </Button>
-
-                {currentSection === totalSections - 1 ? (
-                  <Button
-                    onClick={() => setLocation("/dashboard")}
-                    className="bg-green-600 hover:bg-green-700"
-                  >
-                    Complete & View Dashboard
-                  </Button>
-                ) : (
-                  <Button
-                    onClick={() => setCurrentSection(Math.min(totalSections - 1, currentSection + 1))}
-                    className="bg-amber-600 hover:bg-amber-700"
-                  >
-                    Next Section
-                  </Button>
-                )}
               </div>
             </Card>
           </div>
+
+          {/* Sidebar */}
+          <div className="space-y-6">
+            {/* Risk Alert */}
+            <Card className={`border-2 p-6 ${getRiskBgColor()}`}>
+              <div className="flex items-start gap-3 mb-3">
+                {riskLevel === "critical" && <AlertTriangle className="text-red-500 flex-shrink-0" />}
+                {riskLevel === "high" && <AlertCircle className="text-orange-500 flex-shrink-0" />}
+                {riskLevel === "medium" && <AlertCircle className="text-yellow-500 flex-shrink-0" />}
+                {riskLevel === "low" && <CheckCircle2 className="text-green-500 flex-shrink-0" />}
+                <div>
+                  <h3 className="font-bold text-white capitalize">{riskLevel} Risk</h3>
+                  <p className="text-sm text-slate-300 mt-1">
+                    {riskLevel === "critical" &&
+                      "Immediate action required. Critical compliance gaps detected."}
+                    {riskLevel === "high" &&
+                      "High priority. Significant compliance gaps need attention."}
+                    {riskLevel === "medium" && "Moderate risk. Address these gaps soon."}
+                    {riskLevel === "low" && "Good compliance posture. Continue monitoring."}
+                  </p>
+                </div>
+              </div>
+            </Card>
+
+            {/* Section Scores */}
+            <Card className="bg-slate-800 border-slate-700 p-6">
+              <h3 className="font-bold text-white mb-4">Section Scores</h3>
+              <div className="space-y-3">
+                {SAFEGUARDS_SECTIONS.map((sec) => (
+                  <div key={sec.number} className="flex items-center justify-between">
+                    <span className="text-sm text-slate-300">{sec.name}</span>
+                    <span
+                      className={`font-bold ${
+                        (sectionScores[sec.number] || 0) >= 80
+                          ? "text-green-500"
+                          : (sectionScores[sec.number] || 0) >= 60
+                            ? "text-yellow-500"
+                            : "text-red-500"
+                      }`}
+                    >
+                      {(sectionScores[sec.number] || 0).toFixed(0)}%
+                    </span>
+                  </div>
+                ))}
+              </div>
+            </Card>
+
+            {/* Navigation */}
+            <div className="flex gap-3">
+              <Button
+                variant="outline"
+                className="flex-1"
+                onClick={() => setCurrentSection(Math.max(0, currentSection - 1))}
+                disabled={currentSection === 0}
+              >
+                Previous
+              </Button>
+              <Button
+                className="flex-1 bg-amber-600 hover:bg-amber-700"
+                onClick={() => {
+                  if (currentSection === totalSections - 1) {
+                    setLocation("/dashboard");
+                  } else {
+                    setCurrentSection(Math.min(totalSections - 1, currentSection + 1));
+                  }
+                }}
+              >
+                {currentSection === totalSections - 1 ? "Complete" : "Next"}
+              </Button>
+            </div>
+
+            {/* Dashboard Link */}
+            <Button
+              variant="outline"
+              className="w-full"
+              onClick={() => setLocation("/dashboard")}
+            >
+              View Dashboard
+            </Button>
+          </div>
         </div>
       </div>
-    </div>
-  );
-}
-
-interface QuestionComponentProps {
-  question: Question;
-  value: any;
-  onChange: (value: any) => void;
-}
-
-function QuestionComponent({ question, value, onChange }: QuestionComponentProps) {
-  const weightLabel = {
-    critical: "🔴 Critical",
-    important: "🟡 Important",
-    standard: "🟢 Standard",
-  };
-
-  return (
-    <div className="border-b border-slate-700 pb-6 last:border-b-0">
-      <div className="flex items-start justify-between mb-3">
-        <label className="block text-sm font-semibold text-slate-200 flex-1">
-          {question.text}
-        </label>
-        <span className="text-xs font-semibold text-slate-400 ml-4 whitespace-nowrap">
-          {weightLabel[question.weight]}
-        </span>
-      </div>
-
-      {question.hint && (
-        <p className="text-xs text-slate-400 mb-3 italic">{question.hint}</p>
-      )}
-
-      {question.type === "yes_no" && (
-        <div className="flex gap-3">
-          <button
-            onClick={() => onChange("yes")}
-            className={`px-4 py-2 rounded-lg font-semibold transition-colors ${
-              value === "yes"
-                ? "bg-green-600 text-white"
-                : "bg-slate-700 text-slate-300 hover:bg-slate-600"
-            }`}
-          >
-            Yes
-          </button>
-          <button
-            onClick={() => onChange("no")}
-            className={`px-4 py-2 rounded-lg font-semibold transition-colors ${
-              value === "no"
-                ? "bg-red-600 text-white"
-                : "bg-slate-700 text-slate-300 hover:bg-slate-600"
-            }`}
-          >
-            No
-          </button>
-        </div>
-      )}
-
-      {question.type === "yes_no_partial" && (
-        <div className="flex gap-3">
-          <button
-            onClick={() => onChange("yes")}
-            className={`px-4 py-2 rounded-lg font-semibold transition-colors ${
-              value === "yes"
-                ? "bg-green-600 text-white"
-                : "bg-slate-700 text-slate-300 hover:bg-slate-600"
-            }`}
-          >
-            Yes
-          </button>
-          <button
-            onClick={() => onChange("partial")}
-            className={`px-4 py-2 rounded-lg font-semibold transition-colors ${
-              value === "partial"
-                ? "bg-yellow-600 text-white"
-                : "bg-slate-700 text-slate-300 hover:bg-slate-600"
-            }`}
-          >
-            Partial
-          </button>
-          <button
-            onClick={() => onChange("no")}
-            className={`px-4 py-2 rounded-lg font-semibold transition-colors ${
-              value === "no"
-                ? "bg-red-600 text-white"
-                : "bg-slate-700 text-slate-300 hover:bg-slate-600"
-            }`}
-          >
-            No
-          </button>
-        </div>
-      )}
-
-      {question.type === "text" && (
-        <textarea
-          value={value || ""}
-          onChange={(e) => onChange(e.target.value)}
-          placeholder="Enter your response..."
-          className="w-full px-4 py-2 bg-slate-700 border border-slate-600 rounded-lg text-white placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-amber-500"
-          rows={3}
-        />
-      )}
     </div>
   );
 }
