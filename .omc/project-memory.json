@@ -170,9 +170,33 @@
   "hotPaths": [
     {
       "path": "",
-      "accessCount": 9,
-      "lastAccessed": 1776306322095,
+      "accessCount": 10,
+      "lastAccessed": 1776320311047,
       "type": "directory"
+    },
+    {
+      "path": "server/routers.ts",
+      "accessCount": 9,
+      "lastAccessed": 1776320258844,
+      "type": "file"
+    },
+    {
+      "path": "api/auth/signup.ts",
+      "accessCount": 9,
+      "lastAccessed": 1776321039543,
+      "type": "file"
+    },
+    {
+      "path": "package.json",
+      "accessCount": 8,
+      "lastAccessed": 1776320924704,
+      "type": "file"
+    },
+    {
+      "path": "server/_core/cookies.ts",
+      "accessCount": 8,
+      "lastAccessed": 1776320946676,
+      "type": "file"
     },
     {
       "path": ".env",
@@ -182,21 +206,81 @@
     },
     {
       "path": "server/db.ts",
-      "accessCount": 4,
-      "lastAccessed": 1776304780038,
+      "accessCount": 7,
+      "lastAccessed": 1776320391806,
       "type": "file"
     },
     {
-      "path": "server/routers.ts",
-      "accessCount": 3,
-      "lastAccessed": 1776304701089,
+      "path": "server/_core/env.ts",
+      "accessCount": 7,
+      "lastAccessed": 1776320392181,
+      "type": "file"
+    },
+    {
+      "path": "api/auth/login.ts",
+      "accessCount": 7,
+      "lastAccessed": 1776320952404,
       "type": "file"
     },
     {
       "path": "server/_core/context.ts",
-      "accessCount": 3,
-      "lastAccessed": 1776304706938,
+      "accessCount": 6,
+      "lastAccessed": 1776319451041,
       "type": "file"
+    },
+    {
+      "path": "api/stripe/webhook.ts",
+      "accessCount": 6,
+      "lastAccessed": 1776321039962,
+      "type": "file"
+    },
+    {
+      "path": "server/_core/index.ts",
+      "accessCount": 5,
+      "lastAccessed": 1776311415911,
+      "type": "file"
+    },
+    {
+      "path": "server/storage.ts",
+      "accessCount": 5,
+      "lastAccessed": 1776311649035,
+      "type": "file"
+    },
+    {
+      "path": "client/src/pages/Signup.tsx",
+      "accessCount": 5,
+      "lastAccessed": 1776320313758,
+      "type": "file"
+    },
+    {
+      "path": "vite.config.ts",
+      "accessCount": 4,
+      "lastAccessed": 1776311535011,
+      "type": "file"
+    },
+    {
+      "path": "tsconfig.json",
+      "accessCount": 4,
+      "lastAccessed": 1776320239695,
+      "type": "file"
+    },
+    {
+      "path": "vercel.json",
+      "accessCount": 4,
+      "lastAccessed": 1776320313508,
+      "type": "file"
+    },
+    {
+      "path": "api/trpc/[trpc].ts",
+      "accessCount": 4,
+      "lastAccessed": 1776320514470,
+      "type": "file"
+    },
+    {
+      "path": "client/src",
+      "accessCount": 4,
+      "lastAccessed": 1776320784203,
+      "type": "directory"
     },
     {
       "path": "server/_core/trpc.ts",
@@ -217,24 +301,6 @@
       "type": "file"
     },
     {
-      "path": "server/_core/cookies.ts",
-      "accessCount": 3,
-      "lastAccessed": 1776304712025,
-      "type": "file"
-    },
-    {
-      "path": "server/_core/index.ts",
-      "accessCount": 3,
-      "lastAccessed": 1776304714260,
-      "type": "file"
-    },
-    {
-      "path": "server/_core/env.ts",
-      "accessCount": 3,
-      "lastAccessed": 1776304719338,
-      "type": "file"
-    },
-    {
       "path": "server/pdf-router.ts",
       "accessCount": 3,
       "lastAccessed": 1776304774923,
@@ -247,15 +313,75 @@
       "type": "file"
     },
     {
-      "path": "server/stripe-router.ts",
-      "accessCount": 2,
-      "lastAccessed": 1776304700624,
+      "path": "server/stripe-webhook.ts",
+      "accessCount": 3,
+      "lastAccessed": 1776310977317,
       "type": "file"
     },
     {
-      "path": "server/stripe-webhook.ts",
+      "path": "drizzle/schema.ts",
+      "accessCount": 3,
+      "lastAccessed": 1776311067533,
+      "type": "file"
+    },
+    {
+      "path": "server/_core/llm.ts",
+      "accessCount": 3,
+      "lastAccessed": 1776311094190,
+      "type": "file"
+    },
+    {
+      "path": "server/_core/systemRouter.ts",
+      "accessCount": 3,
+      "lastAccessed": 1776311099812,
+      "type": "file"
+    },
+    {
+      "path": "drizzle.config.ts",
+      "accessCount": 3,
+      "lastAccessed": 1776311378171,
+      "type": "file"
+    },
+    {
+      "path": "client/src/pages/Login.tsx",
+      "accessCount": 3,
+      "lastAccessed": 1776311496352,
+      "type": "file"
+    },
+    {
+      "path": "client/src/main.tsx",
+      "accessCount": 3,
+      "lastAccessed": 1776311641906,
+      "type": "file"
+    },
+    {
+      "path": "client/src/components/DashboardLayout.tsx",
+      "accessCount": 3,
+      "lastAccessed": 1776311644217,
+      "type": "file"
+    },
+    {
+      "path": "client/src/hooks/useAuth.ts",
+      "accessCount": 3,
+      "lastAccessed": 1776319516575,
+      "type": "file"
+    },
+    {
+      "path": "client/src/_core/hooks/useAuth.ts",
+      "accessCount": 3,
+      "lastAccessed": 1776319517000,
+      "type": "file"
+    },
+    {
+      "path": "server/auth.ts",
+      "accessCount": 3,
+      "lastAccessed": 1776320239025,
+      "type": "file"
+    },
+    {
+      "path": "server/stripe-router.ts",
       "accessCount": 2,
-      "lastAccessed": 1776304709176,
+      "lastAccessed": 1776304700624,
       "type": "file"
     },
     {
@@ -265,51 +391,21 @@
       "type": "file"
     },
     {
-      "path": "client/src/pages/Login.tsx",
+      "path": "client/src/const.ts",
       "accessCount": 2,
-      "lastAccessed": 1776304763944,
+      "lastAccessed": 1776311452493,
       "type": "file"
     },
     {
-      "path": "client/src/pages/Signup.tsx",
+      "path": "client/src/pages/Home.tsx",
       "accessCount": 2,
-      "lastAccessed": 1776304764459,
+      "lastAccessed": 1776311654593,
       "type": "file"
     },
     {
-      "path": "vite.config.ts",
+      "path": "client/src/pages/LandingPage.tsx",
       "accessCount": 2,
-      "lastAccessed": 1776304764900,
-      "type": "file"
-    },
-    {
-      "path": "server/_core/llm.ts",
-      "accessCount": 2,
-      "lastAccessed": 1776304769740,
-      "type": "file"
-    },
-    {
-      "path": "server/storage.ts",
-      "accessCount": 2,
-      "lastAccessed": 1776304770297,
-      "type": "file"
-    },
-    {
-      "path": "package.json",
-      "accessCount": 2,
-      "lastAccessed": 1776306309032,
-      "type": "file"
-    },
-    {
-      "path": "drizzle/schema.ts",
-      "accessCount": 1,
-      "lastAccessed": 1776304689384,
-      "type": "file"
-    },
-    {
-      "path": "drizzle.config.ts",
-      "accessCount": 1,
-      "lastAccessed": 1776304689754,
+      "lastAccessed": 1776311655582,
       "type": "file"
     },
     {
@@ -349,12 +445,6 @@
       "type": "file"
     },
     {
-      "path": "server/_core/systemRouter.ts",
-      "accessCount": 1,
-      "lastAccessed": 1776304711933,
-      "type": "file"
-    },
-    {
       "path": "server/email-service.ts",
       "accessCount": 1,
       "lastAccessed": 1776304712252,
@@ -373,22 +463,10 @@
       "type": "file"
     },
     {
-      "path": "client/src/const.ts",
+      "path": "client",
       "accessCount": 1,
-      "lastAccessed": 1776304779955,
-      "type": "file"
-    },
-    {
-      "path": "tsconfig.json",
-      "accessCount": 1,
-      "lastAccessed": 1776306324717,
-      "type": "file"
-    },
-    {
-      "path": "client/src/hooks/useAuth.ts",
-      "accessCount": 1,
-      "lastAccessed": 1776306324850,
-      "type": "file"
+      "lastAccessed": 1776311601105,
+      "type": "directory"
     }
   ],
   "userDirectives": []

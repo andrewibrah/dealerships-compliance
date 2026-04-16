@@ -47,5 +47,11 @@ export async function loginHandler(req: Request, res: Response): Promise<void> {
 // Vercel entry point — Express wrapper ensures req.body is parsed
 const app = express();
 app.use(express.json({ limit: "10mb" }));
-app.post("/api/auth/login", loginHandler);
+// Use wildcard so the route matches regardless of how Vercel passes the URL
+app.post("*", loginHandler);
+// Ensure all errors return JSON (prevents Express from sending HTML error pages)
+app.use((_err: unknown, _req: unknown, res: Response, _next: unknown) => {
+  const msg = _err instanceof Error ? _err.message : String(_err);
+  res.status(500).json({ error: msg });
+});
 export default app;
