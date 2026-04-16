@@ -4,8 +4,7 @@ import { useLocation } from "wouter";
 
 export interface AuthUser {
   id: number;
-  openId: string;
-  email: string | null;
+  email: string;
   name: string | null;
   role: "user" | "admin";
 }

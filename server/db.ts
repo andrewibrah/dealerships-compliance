@@ -1,215 +1,183 @@
 import { eq, and } from "drizzle-orm";
-import { drizzle } from "drizzle-orm/mysql2";
+import { neon } from "@neondatabase/serverless";
+import { drizzle } from "drizzle-orm/neon-http";
+import * as schema from "../drizzle/schema";
 import {
-  InsertUser,
   users,
   dealerships,
-  InsertDealership,
   complianceAnswers,
-  InsertComplianceAnswer,
   subscriptions,
-  InsertSubscription,
   generatedDocuments,
-  InsertGeneratedDocument,
+  type InsertDealership,
+  type InsertComplianceAnswer,
+  type InsertSubscription,
+  type InsertGeneratedDocument,
 } from "../drizzle/schema";
-import { ENV } from "./_core/env";
 
 let _db: ReturnType<typeof drizzle> | null = null;
 
-// Lazily create the drizzle instance so local tooling can run without a DB.
-export async function getDb() {
-  if (!_db && process.env.DATABASE_URL) {
-    try {
-      _db = drizzle(process.env.DATABASE_URL);
-    } catch (error) {
-      console.warn("[Database] Failed to connect:", error);
-      _db = null;
-    }
+export function getDb() {
+  if (!_db) {
+    const url = process.env.POSTGRES_URL ?? process.env.DATABASE_URL;
+    if (!url) throw new Error("POSTGRES_URL is required");
+    const sql = neon(url);
+    _db = drizzle(sql, { schema });
   }
   return _db;
 }
 
-export async function upsertUser(user: InsertUser): Promise<void> {
-  if (!user.openId) {
-    throw new Error("User openId is required for upsert");
-  }
+// ─── User queries ──────────────────────────────────────────────────────────────
 
-  const db = await getDb();
-  if (!db) {
-    console.warn("[Database] Cannot upsert user: database not available");
-    return;
-  }
-
-  try {
-    const values: InsertUser = {
-      openId: user.openId,
-    };
-    const updateSet: Record<string, unknown> = {};
-
-    const textFields = ["name", "email", "loginMethod"] as const;
-    type TextField = (typeof textFields)[number];
-
-    const assignNullable = (field: TextField) => {
-      const value = user[field];
-      if (value === undefined) return;
-      const normalized = value ?? null;
-      values[field] = normalized;
-      updateSet[field] = normalized;
-    };
-
-    textFields.forEach(assignNullable);
-
-    if (user.lastSignedIn !== undefined) {
-      values.lastSignedIn = user.lastSignedIn;
-      updateSet.lastSignedIn = user.lastSignedIn;
-    }
-    if (user.role !== undefined) {
-      values.role = user.role;
-      updateSet.role = user.role;
-    } else if (user.openId === ENV.ownerOpenId) {
-      values.role = "admin";
-      updateSet.role = "admin";
-    }
-
-    if (!values.lastSignedIn) {
-      values.lastSignedIn = new Date();
-    }
-
-    if (Object.keys(updateSet).length === 0) {
-      updateSet.lastSignedIn = new Date();
-    }
-
-    await db.insert(users).values(values).onDuplicateKeyUpdate({
-      set: updateSet,
-    });
-  } catch (error) {
-    console.error("[Database] Failed to upsert user:", error);
-    throw error;
-  }
+export async function getUserById(id: number) {
+  const db = getDb();
+  const result = await db.select().from(users).where(eq(users.id, id)).limit(1);
+  return result[0] ?? null;
 }
 
-export async function getUserByOpenId(openId: string) {
-  const db = await getDb();
-  if (!db) {
-    console.warn("[Database] Cannot get user: database not available");
-    return undefined;
-  }
-
-  const result = await db.select().from(users).where(eq(users.openId, openId)).limit(1);
-
-  return result.length > 0 ? result[0] : undefined;
+export async function getUserByEmail(email: string) {
+  const db = getDb();
+  const result = await db
+    .select()
+    .from(users)
+    .where(eq(users.email, email.toLowerCase().trim()))
+    .limit(1);
+  return result[0] ?? null;
 }
 
-// Dealership queries
+export async function createUser(data: {
+  email: string;
+  passwordHash: string;
+  name?: string | null;
+  role?: "user" | "admin";
+}) {
+  const db = getDb();
+  const result = await db
+    .insert(users)
+    .values({
+      email: data.email.toLowerCase().trim(),
+      passwordHash: data.passwordHash,
+      name: data.name ?? null,
+      role: data.role ?? "user",
+      lastSignedIn: new Date(),
+    })
+    .returning();
+  return result[0]!;
+}
+
+export async function updateUserLastSignedIn(id: number) {
+  const db = getDb();
+  await db.update(users).set({ lastSignedIn: new Date() }).where(eq(users.id, id));
+}
+
+// ─── Dealership queries ────────────────────────────────────────────────────────
+
 export async function createDealership(dealership: InsertDealership) {
-  const db = await getDb();
-  if (!db) throw new Error("Database not available");
-
-  const result = await db.insert(dealerships).values(dealership);
-  return result;
+  const db = getDb();
+  return await db.insert(dealerships).values(dealership).returning();
 }
 
 export async function getDealershipByUserId(userId: number) {
-  const db = await getDb();
-  if (!db) throw new Error("Database not available");
-
+  const db = getDb();
   const result = await db
     .select()
     .from(dealerships)
     .where(eq(dealerships.userId, userId))
     .limit(1);
-
-  return result.length > 0 ? result[0] : null;
+  return result[0] ?? null;
 }
 
 export async function updateDealership(id: number, data: Partial<InsertDealership>) {
-  const db = await getDb();
-  if (!db) throw new Error("Database not available");
-
+  const db = getDb();
   return await db.update(dealerships).set(data).where(eq(dealerships.id, id));
 }
 
-// Compliance answers queries
-export async function saveComplianceAnswer(answer: InsertComplianceAnswer) {
-  const db = await getDb();
-  if (!db) throw new Error("Database not available");
+// ─── Compliance answer queries ─────────────────────────────────────────────────
 
-  return await db.insert(complianceAnswers).values(answer).onDuplicateKeyUpdate({
-    set: {
-      answers: answer.answers,
-      score: answer.score,
-      completed: answer.completed,
-      completedAt: answer.completedAt,
-    },
-  });
+export async function saveComplianceAnswer(answer: InsertComplianceAnswer) {
+  const db = getDb();
+  return await db
+    .insert(complianceAnswers)
+    .values(answer)
+    .onConflictDoUpdate({
+      target: [complianceAnswers.dealershipId, complianceAnswers.section],
+      set: {
+        sectionName: answer.sectionName,
+        answers: answer.answers,
+        score: answer.score,
+        completed: answer.completed,
+        completedAt: answer.completedAt,
+        updatedAt: new Date(),
+      },
+    });
 }
 
 export async function getComplianceAnswers(dealershipId: number, section: number) {
-  const db = await getDb();
-  if (!db) throw new Error("Database not available");
-
+  const db = getDb();
   const result = await db
     .select()
     .from(complianceAnswers)
-    .where(and(eq(complianceAnswers.dealershipId, dealershipId), eq(complianceAnswers.section, section)))
+    .where(
+      and(
+        eq(complianceAnswers.dealershipId, dealershipId),
+        eq(complianceAnswers.section, section)
+      )
+    )
     .limit(1);
-
-  return result.length > 0 ? result[0] : null;
+  return result[0] ?? null;
 }
 
 export async function getAllComplianceAnswers(dealershipId: number) {
-  const db = await getDb();
-  if (!db) throw new Error("Database not available");
-
-  return await db.select().from(complianceAnswers).where(eq(complianceAnswers.dealershipId, dealershipId));
+  const db = getDb();
+  return await db
+    .select()
+    .from(complianceAnswers)
+    .where(eq(complianceAnswers.dealershipId, dealershipId));
 }
 
-// Subscription queries
-export async function getSubscription(dealershipId: number) {
-  const db = await getDb();
-  if (!db) throw new Error("Database not available");
+// ─── Subscription queries ──────────────────────────────────────────────────────
 
+export async function getSubscription(dealershipId: number) {
+  const db = getDb();
   const result = await db
     .select()
     .from(subscriptions)
     .where(eq(subscriptions.dealershipId, dealershipId))
     .limit(1);
-
-  return result.length > 0 ? result[0] : null;
+  return result[0] ?? null;
 }
 
 export async function createSubscription(subscription: InsertSubscription) {
-  const db = await getDb();
-  if (!db) throw new Error("Database not available");
-
+  const db = getDb();
   return await db.insert(subscriptions).values(subscription);
 }
 
 export async function updateSubscription(id: number, data: Partial<InsertSubscription>) {
-  const db = await getDb();
-  if (!db) throw new Error("Database not available");
-
+  const db = getDb();
   return await db.update(subscriptions).set(data).where(eq(subscriptions.id, id));
 }
 
-// Generated documents queries
-export async function saveGeneratedDocument(doc: InsertGeneratedDocument) {
-  const db = await getDb();
-  if (!db) throw new Error("Database not available");
+// ─── Generated document queries ───────────────────────────────────────────────
 
+export async function saveGeneratedDocument(doc: InsertGeneratedDocument) {
+  const db = getDb();
   return await db.insert(generatedDocuments).values(doc);
 }
 
 export async function getGeneratedDocuments(dealershipId: number, docType?: string) {
-  const db = await getDb();
-  if (!db) throw new Error("Database not available");
-
+  const db = getDb();
   if (docType) {
     return await db
       .select()
       .from(generatedDocuments)
-      .where(and(eq(generatedDocuments.dealershipId, dealershipId), eq(generatedDocuments.docType, docType)));
+      .where(
+        and(
+          eq(generatedDocuments.dealershipId, dealershipId),
+          eq(generatedDocuments.docType, docType)
+        )
+      );
   }
-
-  return await db.select().from(generatedDocuments).where(eq(generatedDocuments.dealershipId, dealershipId));
+  return await db
+    .select()
+    .from(generatedDocuments)
+    .where(eq(generatedDocuments.dealershipId, dealershipId));
 }

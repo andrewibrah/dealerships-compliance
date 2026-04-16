@@ -1,24 +1,50 @@
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
 import { useLocation } from "wouter";
-import { getLoginUrl } from "@/const";
-import { useEffect } from "react";
+import { useEffect, useState } from "react";
 import { useAuth } from "@/hooks/useAuth";
 
 export default function Signup() {
   const [, setLocation] = useLocation();
   const { isAuthenticated, loading } = useAuth();
+  const [name, setName] = useState("");
+  const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
+  const [error, setError] = useState("");
+  const [submitting, setSubmitting] = useState(false);
 
-  // If already authenticated, redirect to dashboard
   useEffect(() => {
     if (!loading && isAuthenticated) {
       setLocation("/dashboard");
     }
   }, [isAuthenticated, loading, setLocation]);
 
-  const handleSignup = () => {
-    // Redirect to Manus OAuth login
-    window.location.href = getLoginUrl();
+  const handleSignup = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setError("");
+    setSubmitting(true);
+
+    try {
+      const res = await fetch("/api/auth/signup", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ email, password, name }),
+      });
+
+      if (!res.ok) {
+        const data = await res.json();
+        setError(data.error ?? "Signup failed");
+        return;
+      }
+
+      setLocation("/dashboard");
+    } catch {
+      setError("Network error. Please try again.");
+    } finally {
+      setSubmitting(false);
+    }
   };
 
   if (loading) {
@@ -36,35 +62,79 @@ export default function Signup() {
           <h1 className="mb-2 text-2xl font-bold text-white">Create Account</h1>
           <p className="mb-6 text-slate-400">Start your compliance journey with AAND</p>
 
-          <div className="space-y-4">
-            <Button
-              onClick={handleSignup}
-              className="w-full bg-amber-600 hover:bg-amber-700 text-white font-bold py-6"
-            >
-              Sign Up with Manus
-            </Button>
-
-            <div className="relative">
-              <div className="absolute inset-0 flex items-center">
-                <div className="w-full border-t border-slate-600"></div>
-              </div>
-              <div className="relative flex justify-center text-sm">
-                <span className="px-2 bg-slate-800 text-slate-400">or</span>
-              </div>
+          <form onSubmit={handleSignup} className="space-y-4">
+            <div className="space-y-2">
+              <Label htmlFor="name" className="text-slate-300">
+                Name <span className="text-slate-500">(optional)</span>
+              </Label>
+              <Input
+                id="name"
+                type="text"
+                value={name}
+                onChange={(e) => setName(e.target.value)}
+                placeholder="Your name"
+                className="bg-slate-900 border-slate-600 text-white placeholder:text-slate-500"
+              />
             </div>
 
-            <p className="text-center text-slate-300 text-sm">
-              Already have an account?{" "}
-              <button
-                onClick={() => setLocation("/login")}
-                className="text-amber-500 hover:text-amber-400 font-semibold"
-              >
-                Login here
-              </button>
-            </p>
+            <div className="space-y-2">
+              <Label htmlFor="email" className="text-slate-300">Email</Label>
+              <Input
+                id="email"
+                type="email"
+                value={email}
+                onChange={(e) => setEmail(e.target.value)}
+                placeholder="you@example.com"
+                required
+                className="bg-slate-900 border-slate-600 text-white placeholder:text-slate-500"
+              />
+            </div>
+
+            <div className="space-y-2">
+              <Label htmlFor="password" className="text-slate-300">Password</Label>
+              <Input
+                id="password"
+                type="password"
+                value={password}
+                onChange={(e) => setPassword(e.target.value)}
+                placeholder="Min 8 characters"
+                required
+                minLength={8}
+                className="bg-slate-900 border-slate-600 text-white placeholder:text-slate-500"
+              />
+            </div>
+
+            {error && <p className="text-red-400 text-sm">{error}</p>}
+
+            <Button
+              type="submit"
+              disabled={submitting}
+              className="w-full bg-amber-600 hover:bg-amber-700 text-white font-bold py-6"
+            >
+              {submitting ? "Creating account..." : "Create Account"}
+            </Button>
+          </form>
+
+          <div className="mt-4 relative">
+            <div className="absolute inset-0 flex items-center">
+              <div className="w-full border-t border-slate-600"></div>
+            </div>
+            <div className="relative flex justify-center text-sm">
+              <span className="px-2 bg-slate-800 text-slate-400">or</span>
+            </div>
           </div>
 
-          <div className="mt-8 p-4 bg-slate-900/50 rounded-lg border border-slate-700">
+          <p className="mt-4 text-center text-slate-300 text-sm">
+            Already have an account?{" "}
+            <button
+              onClick={() => setLocation("/login")}
+              className="text-amber-500 hover:text-amber-400 font-semibold"
+            >
+              Login here
+            </button>
+          </p>
+
+          <div className="mt-6 p-4 bg-slate-900/50 rounded-lg border border-slate-700">
             <h3 className="font-semibold text-white mb-2 text-sm">What you'll get:</h3>
             <ul className="space-y-2 text-sm text-slate-300">
               <li className="flex items-center gap-2">
@@ -81,7 +151,7 @@ export default function Signup() {
               </li>
               <li className="flex items-center gap-2">
                 <span className="text-green-500">✓</span>
-                Optional upgrade to Core plan ($199/month)
+                Optional upgrade to Core plan ($200/month)
               </li>
             </ul>
           </div>

@@ -138,7 +138,7 @@ export const appRouter = router({
           sectionName: z.string(),
           answers: z.record(z.string(), z.any()),
           score: z.number().optional(),
-          completed: z.number().optional(),
+          completed: z.union([z.boolean(), z.number()]).optional(),
         })
       )
       .mutation(async ({ ctx, input }) => {
@@ -151,7 +151,7 @@ export const appRouter = router({
           sectionName: input.sectionName,
           answers: input.answers,
           score: input.score,
-          completed: input.completed,
+          completed: input.completed !== undefined ? Boolean(input.completed) : undefined,
           completedAt: input.completed ? new Date() : null,
         });
 
