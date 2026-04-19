@@ -23,6 +23,7 @@ export default function Wizard() {
   const totalSections = SAFEGUARDS_SECTIONS.length;
   const progress = ((currentSection + 1) / totalSections) * 100;
   const section = SAFEGUARDS_SECTIONS[currentSection];
+  const sectionNumber = section.number;
 
   // Load existing answers from database
   const { data: existingAnswers, isLoading: isLoadingAnswers } = trpc.compliance.getAnswers.useQuery(
@@ -84,27 +85,29 @@ export default function Wizard() {
       return;
     }
 
+    const nextSectionAnswers = {
+      ...(answers[sectionNumber] ?? {}),
+      [questionId]: value,
+    };
+
     // Update local state immediately
     setAnswers((prev) => ({
       ...prev,
-      [currentSection]: {
-        ...prev[currentSection],
-        [questionId]: value,
-      },
+      [sectionNumber]: nextSectionAnswers,
     }));
 
     // Save to database
     try {
+      setIsSaving(true);
       await saveAnswerMutation.mutateAsync({
-        section: currentSection,
+        section: sectionNumber,
         sectionName: section.name,
-        answers: {
-          ...answers[currentSection],
-          [questionId]: value,
-        },
+        answers: nextSectionAnswers,
       });
     } catch (error) {
       console.error("Failed to save answer:", error);
+    } finally {
+      setIsSaving(false);
     }
   };
 
@@ -226,9 +229,9 @@ export default function Wizard() {
                     {question.type === "yes_no" && (
                       <div className="flex gap-4">
                         <Button
-                          variant={answers[currentSection]?.[question.id] === "yes" ? "default" : "outline"}
+                          variant={answers[sectionNumber]?.[question.id] === "yes" ? "default" : "outline"}
                           className={
-                            answers[currentSection]?.[question.id] === "yes"
+                            answers[sectionNumber]?.[question.id] === "yes"
                               ? "bg-green-600 hover:bg-green-700"
                               : ""
                           }
@@ -238,9 +241,9 @@ export default function Wizard() {
                           Yes
                         </Button>
                         <Button
-                          variant={answers[currentSection]?.[question.id] === "no" ? "default" : "outline"}
+                          variant={answers[sectionNumber]?.[question.id] === "no" ? "default" : "outline"}
                           className={
-                            answers[currentSection]?.[question.id] === "no"
+                            answers[sectionNumber]?.[question.id] === "no"
                               ? "bg-red-600 hover:bg-red-700"
                               : ""
                           }
@@ -255,9 +258,9 @@ export default function Wizard() {
                     {question.type === "yes_no_partial" && (
                       <div className="flex gap-4">
                         <Button
-                          variant={answers[currentSection]?.[question.id] === "yes" ? "default" : "outline"}
+                          variant={answers[sectionNumber]?.[question.id] === "yes" ? "default" : "outline"}
                           className={
-                            answers[currentSection]?.[question.id] === "yes"
+                            answers[sectionNumber]?.[question.id] === "yes"
                               ? "bg-green-600 hover:bg-green-700"
                               : ""
                           }
@@ -267,9 +270,9 @@ export default function Wizard() {
                           Yes
                         </Button>
                         <Button
-                          variant={answers[currentSection]?.[question.id] === "partial" ? "default" : "outline"}
+                          variant={answers[sectionNumber]?.[question.id] === "partial" ? "default" : "outline"}
                           className={
-                            answers[currentSection]?.[question.id] === "partial"
+                            answers[sectionNumber]?.[question.id] === "partial"
                               ? "bg-yellow-600 hover:bg-yellow-700"
                               : ""
                           }
@@ -279,9 +282,9 @@ export default function Wizard() {
                           Partial
                         </Button>
                         <Button
-                          variant={answers[currentSection]?.[question.id] === "no" ? "default" : "outline"}
+                          variant={answers[sectionNumber]?.[question.id] === "no" ? "default" : "outline"}
                           className={
-                            answers[currentSection]?.[question.id] === "no"
+                            answers[sectionNumber]?.[question.id] === "no"
                               ? "bg-red-600 hover:bg-red-700"
                               : ""
                           }
@@ -297,7 +300,7 @@ export default function Wizard() {
                       <textarea
                         className="w-full bg-slate-900 border border-slate-600 rounded px-3 py-2 text-white placeholder-slate-500"
                         placeholder="Enter your response..."
-                        value={answers[currentSection]?.[question.id] || ""}
+                        value={answers[sectionNumber]?.[question.id] || ""}
                         onChange={(e) => handleAnswer(question.id, e.target.value)}
                         rows={3}
                         disabled={isSaving}

@@ -5,6 +5,13 @@ import * as db from './db';
 import { pdfRouter } from './pdf-router';
 import { stripeRouter } from './stripe-router';
 
+const complianceAnswerValueSchema = z.union([
+  z.string(),
+  z.number(),
+  z.boolean(),
+  z.null(),
+]);
+
 export const appRouter = router({
   system: systemRouter,
 
@@ -102,7 +109,7 @@ export const appRouter = router({
         z.object({
           section: z.number(),
           sectionName: z.string(),
-          answers: z.record(z.string(), z.any()),
+          answers: z.record(z.string(), complianceAnswerValueSchema),
         })
       )
       .mutation(async ({ ctx, input }) => {
@@ -122,7 +129,7 @@ export const appRouter = router({
         z.object({
           section: z.number(),
           sectionName: z.string(),
-          answers: z.record(z.string(), z.any()),
+          answers: z.record(z.string(), complianceAnswerValueSchema),
           score: z.number().optional(),
           completed: z.union([z.boolean(), z.number()]).optional(),
         })
