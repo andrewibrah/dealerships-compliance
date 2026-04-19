@@ -3,56 +3,53 @@ import { Progress } from "@/components/ui/progress";
 import { Button } from "@/components/ui/button";
 import { useState, useEffect } from "react";
 import { useLocation } from "wouter";
-import { SAFEGUARDS_SECTIONS, type Section, type Question } from "@/data/safeguards-questions";
+import { SAFEGUARDS_SECTIONS } from "@/data/safeguards-questions";
 import { calculateSectionScore, calculateOverallScore } from "@/lib/scoring";
 import { AlertCircle, CheckCircle2, AlertTriangle, Loader2 } from "lucide-react";
-import { trpc } from "@/lib/trpc";
+import { supabase } from "@/lib/supabase";
 import { useAuth } from "@/hooks/useAuth";
 import { toast } from "sonner";
 
 export default function Wizard() {
   const [, setLocation] = useLocation();
-  const { user, isAuthenticated } = useAuth();
+  const { session, isAuthenticated } = useAuth();
   const [currentSection, setCurrentSection] = useState(0);
   const [answers, setAnswers] = useState<Record<number, Record<string, any>>>({});
   const [sectionScores, setSectionScores] = useState<Record<number, number>>({});
   const [overallScore, setOverallScore] = useState(0);
   const [riskLevel, setRiskLevel] = useState<"critical" | "high" | "medium" | "low">("critical");
   const [isSaving, setIsSaving] = useState(false);
+  const [isLoadingAnswers, setIsLoadingAnswers] = useState(true);
 
   const totalSections = SAFEGUARDS_SECTIONS.length;
   const progress = ((currentSection + 1) / totalSections) * 100;
   const section = SAFEGUARDS_SECTIONS[currentSection];
   const sectionNumber = section.number;
 
-  // Load existing answers from database
-  const { data: existingAnswers, isLoading: isLoadingAnswers } = trpc.compliance.getAnswers.useQuery(
-    undefined,
-    { enabled: isAuthenticated }
-  );
-
-  // Initialize answers from database on load
+  // Load existing answers directly from Supabase
   useEffect(() => {
-    if (existingAnswers) {
-      const groupedAnswers: Record<number, Record<string, any>> = {};
-      existingAnswers.forEach((answer) => {
-        if (!groupedAnswers[answer.section]) {
-          groupedAnswers[answer.section] = {};
-        }
-        // answers is a JSON object with questionId: value pairs
-        const answersData = answer.answers as Record<string, any>;
-        Object.assign(groupedAnswers[answer.section], answersData);
-      });
-      setAnswers(groupedAnswers);
+    if (!session?.user?.id) {
+      setIsLoadingAnswers(false);
+      return;
     }
-  }, [existingAnswers]);
 
-  // Save answer mutation
-  const saveAnswerMutation = trpc.compliance.saveAnswer.useMutation({
-    onError: (error: any) => {
-      toast.error("Failed to save answer: " + error.message);
-    },
-  });
+    supabase
+      .from("compliance_answers")
+      .select("section, answers")
+      .eq("user_id", session.user.id)
+      .then(({ data, error }) => {
+        if (error) {
+          console.error("Failed to load answers:", error);
+        } else if (data) {
+          const grouped: Record<number, Record<string, any>> = {};
+          data.forEach((row) => {
+            grouped[row.section] = (row.answers as Record<string, any>) ?? {};
+          });
+          setAnswers(grouped);
+        }
+        setIsLoadingAnswers(false);
+      });
+  }, [session?.user?.id]);
 
   // Calculate scores whenever answers change
   useEffect(() => {
@@ -80,7 +77,7 @@ export default function Wizard() {
   }, [answers]);
 
   const handleAnswer = async (questionId: string, value: any) => {
-    if (!isAuthenticated) {
+    if (!session?.user?.id) {
       toast.error("Please log in to save your answers");
       return;
     }
@@ -96,18 +93,25 @@ export default function Wizard() {
       [sectionNumber]: nextSectionAnswers,
     }));
 
-    // Save to database
-    try {
-      setIsSaving(true);
-      await saveAnswerMutation.mutateAsync({
-        section: sectionNumber,
-        sectionName: section.name,
-        answers: nextSectionAnswers,
-      });
-    } catch (error) {
+    // Save directly to Supabase
+    setIsSaving(true);
+    const { error } = await supabase
+      .from("compliance_answers")
+      .upsert(
+        {
+          user_id: session.user.id,
+          section: sectionNumber,
+          section_name: section.name,
+          answers: nextSectionAnswers,
+          updated_at: new Date().toISOString(),
+        },
+        { onConflict: "user_id,section" }
+      );
+
+    setIsSaving(false);
+    if (error) {
       console.error("Failed to save answer:", error);
-    } finally {
-      setIsSaving(false);
+      toast.error("Failed to save answer: " + error.message);
     }
   };
 
