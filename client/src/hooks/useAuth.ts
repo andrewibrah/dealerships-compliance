@@ -1,39 +1,48 @@
-import { useEffect, useState } from "react";
-import { trpc } from "@/lib/trpc";
-import { useLocation } from "wouter";
+import { useState, useEffect, useCallback } from 'react';
+import { supabase } from '@/lib/supabase';
+import { trpc } from '@/lib/trpc';
+import { useLocation } from 'wouter';
 
 export interface AuthUser {
-  id: number;
+  id: string;
   email: string;
   name: string | null;
-  role: "user" | "admin";
+  role: 'user' | 'admin';
 }
 
 export function useAuth() {
-  const [isAuthenticated, setIsAuthenticated] = useState(false);
+  const [session, setSession] = useState<any>(null);
   const [loading, setLoading] = useState(true);
   const [, setLocation] = useLocation();
 
-  const { data: user, isLoading } = trpc.auth.me.useQuery();
-  const logoutMutation = trpc.auth.logout.useMutation();
-
   useEffect(() => {
-    setLoading(isLoading);
-    if (!isLoading) {
-      setIsAuthenticated(!!user);
-    }
-  }, [user, isLoading]);
+    supabase.auth.getSession().then(({ data: { session } }) => {
+      setSession(session);
+      setLoading(false);
+    });
 
-  const logout = async () => {
-    await logoutMutation.mutateAsync();
-    setIsAuthenticated(false);
-    setLocation("/");
-  };
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
+      setSession(session);
+    });
+
+    return () => subscription.unsubscribe();
+  }, []);
+
+  const { data: user, isLoading: userLoading } = trpc.auth.me.useQuery(undefined, {
+    enabled: !!session,
+  });
+
+  const logout = useCallback(async () => {
+    await supabase.auth.signOut();
+    setSession(null);
+    setLocation('/');
+  }, [setLocation]);
 
   return {
-    user: user as AuthUser | null,
-    isAuthenticated,
-    loading,
+    user: (user as AuthUser | null | undefined) ?? null,
+    session,
+    isAuthenticated: !!session,
+    loading: loading || userLoading,
     logout,
   };
 }

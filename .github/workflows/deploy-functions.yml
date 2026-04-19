@@ -1,0 +1,48 @@
+name: Deploy Supabase Edge Functions
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'supabase/functions/**'
+  workflow_dispatch:
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Supabase CLI
+        uses: supabase/setup-cli@v1
+        with:
+          version: latest
+
+      - name: Deploy Edge Functions
+        run: |
+          supabase functions deploy trpc --project-ref ${{ secrets.SUPABASE_PROJECT_REF }} --no-verify-jwt
+          supabase functions deploy stripe-webhook --project-ref ${{ secrets.SUPABASE_PROJECT_REF }} --no-verify-jwt
+          supabase functions deploy handle-signup --project-ref ${{ secrets.SUPABASE_PROJECT_REF }} --no-verify-jwt
+        env:
+          SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
+
+      - name: Set Edge Function Secrets
+        run: |
+          supabase secrets set \
+            SUPABASE_URL=${{ secrets.SUPABASE_URL }} \
+            SUPABASE_ANON_KEY=${{ secrets.SUPABASE_ANON_KEY }} \
+            SUPABASE_SERVICE_ROLE_KEY=${{ secrets.SUPABASE_SERVICE_ROLE_KEY }} \
+            SUPABASE_DB_URL=${{ secrets.SUPABASE_DB_URL }} \
+            ADMIN_EMAIL=${{ secrets.ADMIN_EMAIL }} \
+            STRIPE_SECRET_KEY=${{ secrets.STRIPE_SECRET_KEY }} \
+            STRIPE_WEBHOOK_SECRET=${{ secrets.STRIPE_WEBHOOK_SECRET }} \
+            STRIPE_CORE_PRICE_ID=${{ secrets.STRIPE_CORE_PRICE_ID }} \
+            STRIPE_MANAGED_PRICE_ID=${{ secrets.STRIPE_MANAGED_PRICE_ID }} \
+            RESEND_API_KEY=${{ secrets.RESEND_API_KEY }} \
+            OPENAI_API_KEY=${{ secrets.OPENAI_API_KEY }} \
+            VITE_APP_URL=https://andrewibrah.github.io/aand-compliance \
+            --project-ref ${{ secrets.SUPABASE_PROJECT_REF }}
+        env:
+          SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}

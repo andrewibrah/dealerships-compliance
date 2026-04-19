@@ -1,101 +1,57 @@
-import { eq, and } from "drizzle-orm";
-import { neon } from "@neondatabase/serverless";
-import { drizzle } from "drizzle-orm/neon-http";
-import * as schema from "../drizzle/schema";
+import { drizzle } from 'drizzle-orm/postgres-js';
+import postgres from 'postgres';
+import { eq, and } from 'drizzle-orm';
 import {
-  users,
-  dealerships,
-  complianceAnswers,
-  subscriptions,
-  generatedDocuments,
-  type InsertDealership,
-  type InsertComplianceAnswer,
-  type InsertSubscription,
-  type InsertGeneratedDocument,
-} from "../drizzle/schema";
+  users, dealerships, complianceAnswers, subscriptions, generatedDocuments,
+  type User, type Dealership, type ComplianceAnswer, type Subscription, type GeneratedDocument,
+  type InsertDealership, type InsertComplianceAnswer, type InsertSubscription, type InsertGeneratedDocument,
+} from '../drizzle/schema';
 
-let _db: ReturnType<typeof drizzle> | null = null;
-
-export function getDb() {
-  if (!_db) {
-    const url = process.env.POSTGRES_URL ?? process.env.DATABASE_URL;
-    if (!url) throw new Error("POSTGRES_URL is required");
-    const sql = neon(url);
-    _db = drizzle(sql, { schema });
-  }
-  return _db;
+function getDb() {
+  const url = process.env.SUPABASE_DB_URL ?? process.env.DATABASE_URL ?? '';
+  const client = postgres(url, { prepare: false });
+  return drizzle(client, { schema: { users, dealerships, complianceAnswers, subscriptions, generatedDocuments } });
 }
 
-// ─── User queries ──────────────────────────────────────────────────────────────
-
-export async function getUserById(id: number) {
-  const db = getDb();
-  const result = await db.select().from(users).where(eq(users.id, id)).limit(1);
-  return result[0] ?? null;
+// Users
+export async function getUserById(id: string) {
+  const [user] = await getDb().select().from(users).where(eq(users.id, id));
+  return user ?? null;
 }
 
 export async function getUserByEmail(email: string) {
-  const db = getDb();
-  const result = await db
-    .select()
-    .from(users)
-    .where(eq(users.email, email.toLowerCase().trim()))
-    .limit(1);
-  return result[0] ?? null;
+  const [user] = await getDb().select().from(users).where(eq(users.email, email.toLowerCase().trim()));
+  return user ?? null;
 }
 
-export async function createUser(data: {
-  email: string;
-  passwordHash: string;
-  name?: string | null;
-  role?: "user" | "admin";
-}) {
-  const db = getDb();
-  const result = await db
-    .insert(users)
-    .values({
-      email: data.email.toLowerCase().trim(),
-      passwordHash: data.passwordHash,
-      name: data.name ?? null,
-      role: data.role ?? "user",
-      lastSignedIn: new Date(),
-    })
-    .returning();
-  return result[0]!;
+export async function createUser(data: Omit<typeof users.$inferInsert, 'createdAt' | 'updatedAt'>) {
+  const [user] = await getDb().insert(users).values(data).returning();
+  return user;
 }
 
-export async function updateUserLastSignedIn(id: number) {
-  const db = getDb();
-  await db.update(users).set({ lastSignedIn: new Date() }).where(eq(users.id, id));
+export async function updateUserLastSignedIn(id: string) {
+  await getDb().update(users).set({ lastSignedIn: new Date() }).where(eq(users.id, id));
 }
 
-// ─── Dealership queries ────────────────────────────────────────────────────────
-
-export async function createDealership(dealership: InsertDealership) {
-  const db = getDb();
-  return await db.insert(dealerships).values(dealership).returning();
+// Dealerships
+export async function getDealershipByUserId(userId: string) {
+  const [d] = await getDb().select().from(dealerships).where(eq(dealerships.userId, userId));
+  return d ?? null;
 }
 
-export async function getDealershipByUserId(userId: number) {
-  const db = getDb();
-  const result = await db
-    .select()
-    .from(dealerships)
-    .where(eq(dealerships.userId, userId))
-    .limit(1);
-  return result[0] ?? null;
+export async function createDealership(data: InsertDealership) {
+  const [d] = await getDb().insert(dealerships).values(data).returning();
+  return d;
 }
 
 export async function updateDealership(id: number, data: Partial<InsertDealership>) {
-  const db = getDb();
-  return await db.update(dealerships).set(data).where(eq(dealerships.id, id));
+  const [d] = await getDb().update(dealerships).set({ ...data, updatedAt: new Date() }).where(eq(dealerships.id, id)).returning();
+  return d;
 }
 
-// ─── Compliance answer queries ─────────────────────────────────────────────────
-
+// Compliance
 export async function saveComplianceAnswer(answer: InsertComplianceAnswer) {
-  const db = getDb();
-  return await db
+  const [row] = await getDb()
     .insert(complianceAnswers)
     .values(answer)
     .onConflictDoUpdate({
@@ -108,76 +64,53 @@ export async function saveComplianceAnswer(answer: InsertComplianceAnswer) {
         completedAt: answer.completedAt,
         updatedAt: new Date(),
       },
-    });
+    })
+    .returning();
+  return row;
 }
 
-export async function getComplianceAnswers(dealershipId: number, section: number) {
-  const db = getDb();
-  const result = await db
-    .select()
-    .from(complianceAnswers)
-    .where(
-      and(
-        eq(complianceAnswers.dealershipId, dealershipId),
-        eq(complianceAnswers.section, section)
-      )
-    )
-    .limit(1);
-  return result[0] ?? null;
+export async function getComplianceAnswers(dealershipId: number) {
+  return getDb().select().from(complianceAnswers).where(eq(complianceAnswers.dealershipId, dealershipId));
 }
 
 export async function getAllComplianceAnswers(dealershipId: number) {
-  const db = getDb();
-  return await db
-    .select()
-    .from(complianceAnswers)
-    .where(eq(complianceAnswers.dealershipId, dealershipId));
+  return getComplianceAnswers(dealershipId);
 }
 
-// ─── Subscription queries ──────────────────────────────────────────────────────
-
+// Subscriptions
 export async function getSubscription(dealershipId: number) {
-  const db = getDb();
-  const result = await db
-    .select()
-    .from(subscriptions)
-    .where(eq(subscriptions.dealershipId, dealershipId))
-    .limit(1);
-  return result[0] ?? null;
+  const [sub] = await getDb().select().from(subscriptions).where(eq(subscriptions.dealershipId, dealershipId));
+  return sub ?? null;
 }
 
-export async function createSubscription(subscription: InsertSubscription) {
-  const db = getDb();
-  return await db.insert(subscriptions).values(subscription);
+export async function createSubscription(data: InsertSubscription) {
+  const [sub] = await getDb().insert(subscriptions).values(data).returning();
+  return sub;
 }
 
 export async function updateSubscription(id: number, data: Partial<InsertSubscription>) {
-  const db = getDb();
-  return await db.update(subscriptions).set(data).where(eq(subscriptions.id, id));
+  const [sub] = await getDb().update(subscriptions).set(data).where(eq(subscriptions.id, id)).returning();
+  return sub;
 }
 
-// ─── Generated document queries ───────────────────────────────────────────────
+export async function getSubscriptionByStripeId(stripeSubId: string) {
+  const [sub] = await getDb().select().from(subscriptions).where(eq(subscriptions.stripeSubscriptionId, stripeSubId));
+  return sub ?? null;
+}
 
+// Documents
 export async function saveGeneratedDocument(doc: InsertGeneratedDocument) {
-  const db = getDb();
-  return await db.insert(generatedDocuments).values(doc);
+  const [d] = await getDb().insert(generatedDocuments).values(doc).returning();
+  return d;
 }
 
 export async function getGeneratedDocuments(dealershipId: number, docType?: string) {
-  const db = getDb();
   if (docType) {
-    return await db
-      .select()
-      .from(generatedDocuments)
-      .where(
-        and(
-          eq(generatedDocuments.dealershipId, dealershipId),
-          eq(generatedDocuments.docType, docType)
-        )
-      );
+    return getDb().select().from(generatedDocuments).where(
+      and(eq(generatedDocuments.dealershipId, dealershipId), eq(generatedDocuments.docType, docType))
+    );
   }
-  return await db
-    .select()
-    .from(generatedDocuments)
-    .where(eq(generatedDocuments.dealershipId, dealershipId));
+  return getDb().select().from(generatedDocuments).where(eq(generatedDocuments.dealershipId, dealershipId));
 }
+
+export type { User, Dealership, ComplianceAnswer, Subscription, GeneratedDocument };

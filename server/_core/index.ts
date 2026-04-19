@@ -6,8 +6,6 @@ import { createExpressMiddleware } from "@trpc/server/adapters/express";
 import { appRouter } from "../routers";
 import { createContext } from "./context";
 import { serveStatic, setupVite } from "./vite";
-import { loginHandler } from "../../api/auth/login";
-import { signupHandler } from "../../api/auth/signup";
 
 function isPortAvailable(port: number): Promise<boolean> {
   return new Promise(resolve => {
@@ -33,11 +31,7 @@ async function startServer() {
   app.use(express.json({ limit: "50mb" }));
   app.use(express.urlencoded({ limit: "50mb", extended: true }));
 
-  // Auth routes
-  app.post("/api/auth/login", loginHandler);
-  app.post("/api/auth/signup", signupHandler);
-
-  // tRPC API
+  // tRPC API — auth is handled by Supabase Auth on the frontend
   app.use(
     "/api/trpc",
     createExpressMiddleware({

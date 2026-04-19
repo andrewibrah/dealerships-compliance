@@ -1,35 +1,27 @@
-import { COOKIE_NAME } from "@shared/const";
-import { getSessionCookieOptions } from "./_core/cookies";
-import { systemRouter } from "./_core/systemRouter";
-import { publicProcedure, router, protectedProcedure } from "./_core/trpc";
-import { z } from "zod";
-import * as db from "./db";
-import { pdfRouter } from "./pdf-router";
-import { stripeRouter } from "./stripe-router";
+import { systemRouter } from './_core/systemRouter';
+import { publicProcedure, router, protectedProcedure } from './_core/trpc';
+import { z } from 'zod';
+import * as db from './db';
+import { pdfRouter } from './pdf-router';
+import { stripeRouter } from './stripe-router';
 
 export const appRouter = router({
   system: systemRouter,
 
   auth: router({
     me: publicProcedure.query((opts) => opts.ctx.user),
-    logout: publicProcedure.mutation(({ ctx }) => {
-      const cookieOptions = getSessionCookieOptions(ctx.req);
-      ctx.res.clearCookie(COOKIE_NAME, { ...cookieOptions, maxAge: -1 });
-      return {
-        success: true,
-      } as const;
+    logout: publicProcedure.mutation(() => {
+      // Session is managed by Supabase client on the frontend
+      return { success: true } as const;
     }),
   }),
 
   // Dealership management
   dealership: router({
-    // Get or create dealership for current user
     getCurrent: protectedProcedure.query(async ({ ctx }) => {
-      const dealership = await db.getDealershipByUserId(ctx.user.id);
-      return dealership;
+      return db.getDealershipByUserId(ctx.user.id);
     }),
 
-    // Create dealership profile
     create: protectedProcedure
       .input(
         z.object({
@@ -44,14 +36,19 @@ export const appRouter = router({
         })
       )
       .mutation(async ({ ctx, input }) => {
-        const dealership = await db.createDealership({
+        return db.createDealership({
           userId: ctx.user.id,
-          ...input,
+          name: input.name,
+          address: input.address ?? '',
+          city: input.city ?? '',
+          state: input.state ?? '',
+          dmsVendor: input.dmsVendor ?? '',
+          rooftopCount: input.rooftopCount ?? 1,
+          qualifiedIndividual: input.qualifiedIndividual ?? '',
+          qiEmail: input.qiEmail ?? '',
         });
-        return dealership;
       }),
 
-    // Update dealership profile
     update: protectedProcedure
       .input(
         z.object({
@@ -67,12 +64,10 @@ export const appRouter = router({
         })
       )
       .mutation(async ({ ctx, input }) => {
-        // Verify user owns this dealership
         const dealership = await db.getDealershipByUserId(ctx.user.id);
         if (!dealership || dealership.id !== input.id) {
-          throw new Error("Unauthorized");
+          throw new Error('Unauthorized');
         }
-
         const { id, ...updateData } = input;
         await db.updateDealership(id, updateData);
         return { success: true };
@@ -81,33 +76,27 @@ export const appRouter = router({
 
   // Compliance answers
   compliance: router({
-    // Get all answers for a dealership (alias for Wizard)
     getAnswers: protectedProcedure.query(async ({ ctx }) => {
       const dealership = await db.getDealershipByUserId(ctx.user.id);
       if (!dealership) return [];
-
-      return await db.getAllComplianceAnswers(dealership.id);
+      return db.getAllComplianceAnswers(dealership.id);
     }),
 
-    // Get all answers for a dealership
     getAll: protectedProcedure.query(async ({ ctx }) => {
       const dealership = await db.getDealershipByUserId(ctx.user.id);
       if (!dealership) return [];
-
-      return await db.getAllComplianceAnswers(dealership.id);
+      return db.getAllComplianceAnswers(dealership.id);
     }),
 
-    // Get answers for a specific section
     getSection: protectedProcedure
       .input(z.object({ section: z.number() }))
       .query(async ({ ctx, input }) => {
         const dealership = await db.getDealershipByUserId(ctx.user.id);
         if (!dealership) return null;
-
-        return await db.getComplianceAnswers(dealership.id, input.section);
+        const answers = await db.getAllComplianceAnswers(dealership.id);
+        return answers.find((a) => a.section === input.section) ?? null;
       }),
 
-    // Save a single answer (called from Wizard)
     saveAnswer: protectedProcedure
       .input(
         z.object({
@@ -118,19 +107,16 @@ export const appRouter = router({
       )
       .mutation(async ({ ctx, input }) => {
         const dealership = await db.getDealershipByUserId(ctx.user.id);
-        if (!dealership) throw new Error("No dealership found");
-
+        if (!dealership) throw new Error('No dealership found');
         await db.saveComplianceAnswer({
           dealershipId: dealership.id,
           section: input.section,
           sectionName: input.sectionName,
           answers: input.answers,
         });
-
         return { success: true };
       }),
 
-    // Save answers for a section
     saveSection: protectedProcedure
       .input(
         z.object({
@@ -143,8 +129,7 @@ export const appRouter = router({
       )
       .mutation(async ({ ctx, input }) => {
         const dealership = await db.getDealershipByUserId(ctx.user.id);
-        if (!dealership) throw new Error("No dealership found");
-
+        if (!dealership) throw new Error('No dealership found');
         await db.saveComplianceAnswer({
           dealershipId: dealership.id,
           section: input.section,
@@ -154,56 +139,48 @@ export const appRouter = router({
           completed: input.completed !== undefined ? Boolean(input.completed) : undefined,
           completedAt: input.completed ? new Date() : null,
         });
-
         return { success: true };
       }),
   }),
 
   // Subscription management
   subscription: router({
-    // Get current subscription
     getCurrent: protectedProcedure.query(async ({ ctx }) => {
       const dealership = await db.getDealershipByUserId(ctx.user.id);
       if (!dealership) return null;
-
-      return await db.getSubscription(dealership.id);
+      return db.getSubscription(dealership.id);
     }),
 
-    // Create subscription (called after Stripe payment)
     create: protectedProcedure
       .input(
         z.object({
           stripeCustomerId: z.string(),
           stripeSubscriptionId: z.string(),
-          plan: z.enum(["free", "core", "managed"]),
+          plan: z.enum(['free', 'core', 'managed']),
         })
       )
       .mutation(async ({ ctx, input }) => {
         const dealership = await db.getDealershipByUserId(ctx.user.id);
-        if (!dealership) throw new Error("No dealership found");
-
-        return await db.createSubscription({
+        if (!dealership) throw new Error('No dealership found');
+        return db.createSubscription({
           dealershipId: dealership.id,
           ...input,
-          status: "active",
+          status: 'active',
         });
       }),
 
-    // Update subscription status
     updateStatus: protectedProcedure
       .input(
         z.object({
           stripeSubscriptionId: z.string(),
-          status: z.enum(["active", "inactive", "canceled"]),
+          status: z.enum(['active', 'inactive', 'canceled']),
         })
       )
       .mutation(async ({ ctx, input }) => {
         const dealership = await db.getDealershipByUserId(ctx.user.id);
-        if (!dealership) throw new Error("No dealership found");
-
+        if (!dealership) throw new Error('No dealership found');
         const subscription = await db.getSubscription(dealership.id);
-        if (!subscription) throw new Error("No subscription found");
-
+        if (!subscription) throw new Error('No subscription found');
         await db.updateSubscription(subscription.id, { status: input.status });
         return { success: true };
       }),
@@ -217,25 +194,20 @@ export const appRouter = router({
 
   // Generated documents
   documents: router({
-    // Get all generated documents
     getAll: protectedProcedure.query(async ({ ctx }) => {
       const dealership = await db.getDealershipByUserId(ctx.user.id);
       if (!dealership) return [];
-
-      return await db.getGeneratedDocuments(dealership.id);
+      return db.getGeneratedDocuments(dealership.id);
     }),
 
-    // Get specific document type
     getByType: protectedProcedure
       .input(z.object({ docType: z.string() }))
       .query(async ({ ctx, input }) => {
         const dealership = await db.getDealershipByUserId(ctx.user.id);
         if (!dealership) return [];
-
-        return await db.getGeneratedDocuments(dealership.id, input.docType);
+        return db.getGeneratedDocuments(dealership.id, input.docType);
       }),
 
-    // Save generated document
     save: protectedProcedure
       .input(
         z.object({
@@ -245,9 +217,8 @@ export const appRouter = router({
       )
       .mutation(async ({ ctx, input }) => {
         const dealership = await db.getDealershipByUserId(ctx.user.id);
-        if (!dealership) throw new Error("No dealership found");
-
-        return await db.saveGeneratedDocument({
+        if (!dealership) throw new Error('No dealership found');
+        return db.saveGeneratedDocument({
           dealershipId: dealership.id,
           docType: input.docType,
           storagePath: input.storagePath,

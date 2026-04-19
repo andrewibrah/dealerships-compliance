@@ -1,46 +1,40 @@
-import { Button } from "@/components/ui/button";
-import { Card } from "@/components/ui/card";
-import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
-import { useLocation } from "wouter";
-import { useEffect, useState } from "react";
-import { useAuth } from "@/hooks/useAuth";
+import { Button } from '@/components/ui/button';
+import { Card } from '@/components/ui/card';
+import { Input } from '@/components/ui/input';
+import { Label } from '@/components/ui/label';
+import { useLocation } from 'wouter';
+import { useEffect, useState } from 'react';
+import { useAuth } from '@/hooks/useAuth';
+import { supabase } from '@/lib/supabase';
 
 export default function Login() {
   const [, setLocation] = useLocation();
   const { isAuthenticated, loading } = useAuth();
-  const [email, setEmail] = useState("");
-  const [password, setPassword] = useState("");
-  const [error, setError] = useState("");
+  const [email, setEmail] = useState('');
+  const [password, setPassword] = useState('');
+  const [error, setError] = useState('');
   const [submitting, setSubmitting] = useState(false);
 
   useEffect(() => {
     if (!loading && isAuthenticated) {
-      setLocation("/dashboard");
+      setLocation('/dashboard');
     }
   }, [isAuthenticated, loading, setLocation]);
 
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
-    setError("");
+    setError('');
     setSubmitting(true);
 
     try {
-      const res = await fetch("/api/auth/login", {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({ email, password }),
-      });
-
-      if (!res.ok) {
-        const data = await res.json();
-        setError(data.error ?? "Login failed");
+      const { error } = await supabase.auth.signInWithPassword({ email, password });
+      if (error) {
+        setError(error.message);
         return;
       }
-
-      setLocation("/dashboard");
+      setLocation('/dashboard');
     } catch {
-      setError("Network error. Please try again.");
+      setError('Network error. Please try again.');
     } finally {
       setSubmitting(false);
     }
@@ -95,7 +89,7 @@ export default function Login() {
               disabled={submitting}
               className="w-full bg-amber-600 hover:bg-amber-700 text-white font-bold py-6"
             >
-              {submitting ? "Signing in..." : "Sign In"}
+              {submitting ? 'Signing in...' : 'Sign In'}
             </Button>
           </form>
 
@@ -109,9 +103,9 @@ export default function Login() {
           </div>
 
           <p className="mt-4 text-center text-slate-300 text-sm">
-            Don't have an account?{" "}
+            Don't have an account?{' '}
             <button
-              onClick={() => setLocation("/signup")}
+              onClick={() => setLocation('/signup')}
               className="text-amber-500 hover:text-amber-400 font-semibold"
             >
               Sign up here

@@ -10,6 +10,7 @@ build/
 
 # Environment variables
 .env
+supabase.env
 .env.local
 .env.development.local
 .env.test.local
@@ -109,6 +110,15 @@ temp/
 
 # Webdev artifacts (checkpoint zips, migrations, etc.)
 .webdev/
+
+# Tool internals
+.omc/
+.agents/
+skills-lock.json
+.mcp.json
+
+# Supabase CLI temp files
+supabase/.temp/
 
 # Manus version file (auto-generated, not part of source)
 client/public/__manus__/version.json

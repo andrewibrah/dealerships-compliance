@@ -1,19 +1,19 @@
-import { StorageClient } from '@supabase/storage-js';
+import { StorageClient } from 'npm:@supabase/storage-js';
+import { ENV } from './env.ts';
 
 const BUCKET = 'documents';
 
 function getStorageClient() {
-  const url = `${process.env.SUPABASE_URL}/storage/v1`;
-  const key = process.env.SUPABASE_SERVICE_ROLE_KEY ?? '';
+  const url = `${ENV.supabaseUrl}/storage/v1`;
   return new StorageClient(url, {
-    apikey: key,
-    Authorization: `Bearer ${key}`,
+    apikey: ENV.supabaseServiceRoleKey,
+    Authorization: `Bearer ${ENV.supabaseServiceRoleKey}`,
   });
 }
 
 export async function storagePut(
   fileName: string,
-  data: Buffer | Uint8Array,
+  data: Uint8Array,
   contentType = 'application/octet-stream'
 ): Promise<{ key: string; url: string }> {
   const storage = getStorageClient();
