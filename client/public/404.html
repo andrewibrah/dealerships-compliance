@@ -3,10 +3,15 @@
 <head>
 <script>
   var l = window.location;
+  var pathSegments = l.pathname.split('/');
+  // For project pages: ['', 'repo-name', ...rest]
+  // Keep base (segments 0-1), encode only the rest
+  var base = pathSegments.slice(0, 2).join('/');
+  var routePath = pathSegments.slice(2).join('/');
   l.replace(
     l.protocol + '//' + l.hostname + (l.port ? ':' + l.port : '') +
-    l.pathname.split('/').slice(0, 2).join('/') +
-    '/?/' + l.pathname.slice(1).replace(/&/g, '~and~') +
+    base + '/?/' +
+    routePath.replace(/&/g, '~and~') +
     (l.search ? '&' + l.search.slice(1).replace(/&/g, '~and~') : '') +
     l.hash
   );
