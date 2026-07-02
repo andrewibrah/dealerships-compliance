@@ -42,7 +42,7 @@ const dealershipRouter = router({
       dmsVendor: z.string().optional(),
       rooftopCount: z.number().int().min(1).optional(),
       qualifiedIndividual: z.string().optional(),
-      qiEmail: z.string().email().optional(),
+      qiEmail: z.string().email().or(z.literal('')).optional(),
     }))
     .mutation(async ({ ctx, input }) => {
       return db.createDealership({
@@ -67,7 +67,7 @@ const dealershipRouter = router({
       dmsVendor: z.string().optional(),
       rooftopCount: z.number().int().min(1).optional(),
       qualifiedIndividual: z.string().optional(),
-      qiEmail: z.string().email().optional(),
+      qiEmail: z.string().email().or(z.literal('')).optional(),
     }))
     .mutation(async ({ ctx, input }) => {
       const existing = await db.getDealershipByUserId(ctx.user.id);

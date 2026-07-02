@@ -11,6 +11,7 @@ import Dashboard from "./pages/Dashboard";
 import Wizard from "./pages/Wizard";
 import Documents from "./pages/Documents";
 import Pricing from "./pages/Pricing";
+import Profile from "./pages/Profile";
 
 const base = import.meta.env.BASE_URL.replace(/\/$/, '');
 
@@ -22,6 +23,7 @@ function AppRouter() {
         <Route path={"/signup"} component={Signup} />
         <Route path={"/login"} component={Login} />
         <Route path={"/dashboard"} component={Dashboard} />
+        <Route path={"/profile"} component={Profile} />
         <Route path={"/wizard"} component={Wizard} />
         <Route path={"/documents"} component={Documents} />
         <Route path={"/pricing"} component={Pricing} />

@@ -19,7 +19,10 @@ export default function Dashboard() {
   const answersQuery = trpc.compliance.getAnswers.useQuery(undefined, {
     enabled: isAuthenticated,
   });
-  const isLoadingScores = isAuthenticated && answersQuery.isLoading;
+  const dealershipQuery = trpc.dealership.getCurrent.useQuery(undefined, {
+    enabled: isAuthenticated,
+  });
+  const isLoadingScores = isAuthenticated && (answersQuery.isLoading || dealershipQuery.isLoading);
 
   const grouped: Record<number, Record<string, any>> = {};
   (answersQuery.data ?? []).forEach((row) => {
@@ -38,6 +41,18 @@ export default function Dashboard() {
   });
 
   const overallScore = calculateOverallScore(sectionResults).overall;
+  const dealership = dealershipQuery.data;
+  const dealershipName = dealership?.name && dealership.name !== "My Dealership"
+    ? dealership.name
+    : null;
+  const missingProfileFields = [
+    !dealershipName ? "dealership name" : null,
+    !dealership?.address ? "address" : null,
+    !dealership?.city ? "city" : null,
+    !dealership?.state ? "state" : null,
+    !dealership?.qualifiedIndividual ? "Qualified Individual" : null,
+    !dealership?.qiEmail ? "QI email" : null,
+  ].filter(Boolean);
 
   // Owner priorities: worst sections first, critical gaps ahead of standard ones
   const prioritySections = [...sectionResults]
@@ -88,14 +103,40 @@ export default function Dashboard() {
       <div className="border-b border-slate-700 bg-slate-900/50 backdrop-blur">
         <div className="container mx-auto px-4 py-6 flex justify-between items-center">
           <div>
-            <h1 className="text-3xl font-bold text-white">Compliance Dashboard</h1>
+            <h1 className="text-3xl font-bold text-white">
+              {dealershipName ? `${dealershipName} Dashboard` : "Compliance Dashboard"}
+            </h1>
             <p className="text-slate-400">Welcome, {user.name || user.email}</p>
           </div>
-          <Button onClick={() => setLocation("/wizard")} className="bg-amber-600 hover:bg-amber-700">
-            Continue Assessment
-          </Button>
+          <div className="flex gap-3">
+            <Button variant="outline" onClick={() => setLocation("/profile")}>
+              Dealership Profile
+            </Button>
+            <Button onClick={() => setLocation("/wizard")} className="bg-amber-600 hover:bg-amber-700">
+              Continue Assessment
+            </Button>
+          </div>
         </div>
       </div>
+
+      {missingProfileFields.length > 0 && (
+        <div className="border-b border-amber-600 bg-amber-950/30">
+          <div className="container mx-auto px-4 py-4 flex items-center justify-between gap-4">
+            <div className="flex items-start gap-3">
+              <AlertTriangle className="text-amber-500 flex-shrink-0 mt-0.5" size={20} />
+              <div>
+                <h3 className="font-semibold text-amber-300">Complete your dealership profile</h3>
+                <p className="text-sm text-amber-200">
+                  Your WISP and board report will look sharper with {missingProfileFields.join(", ")} filled in.
+                </p>
+              </div>
+            </div>
+            <Button onClick={() => setLocation("/profile")} className="bg-amber-600 hover:bg-amber-700">
+              Complete Profile
+            </Button>
+          </div>
+        </div>
+      )}
 
       {/* FTC Urgency Banner */}
       <div className="border-b border-orange-600 bg-orange-950/30">

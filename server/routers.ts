@@ -55,9 +55,9 @@ export const appRouter = router({
           city: z.string().optional(),
           state: z.string().optional(),
           dmsVendor: z.string().optional(),
-          rooftopCount: z.number().optional(),
+          rooftopCount: z.number().int().min(1).optional(),
           qualifiedIndividual: z.string().optional(),
-          qiEmail: z.string().email().optional(),
+          qiEmail: z.string().email().or(z.literal('')).optional(),
         })
       )
       .mutation(async ({ ctx, input }) => {
@@ -83,9 +83,9 @@ export const appRouter = router({
           city: z.string().optional(),
           state: z.string().optional(),
           dmsVendor: z.string().optional(),
-          rooftopCount: z.number().optional(),
+          rooftopCount: z.number().int().min(1).optional(),
           qualifiedIndividual: z.string().optional(),
-          qiEmail: z.string().email().optional(),
+          qiEmail: z.string().email().or(z.literal('')).optional(),
         })
       )
       .mutation(async ({ ctx, input }) => {

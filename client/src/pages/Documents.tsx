@@ -21,6 +21,9 @@ export default function Documents() {
   const documentsQuery = trpc.documents.getAll.useQuery(undefined, {
     enabled: isAuthenticated,
   });
+  const dealershipQuery = trpc.dealership.getCurrent.useQuery(undefined, {
+    enabled: isAuthenticated,
+  });
 
   const hasSubscription =
     subscriptionQuery.data != null &&
@@ -46,7 +49,7 @@ export default function Documents() {
   });
   const isGenerating = generateWISP.isPending || generateBoardReport.isPending;
 
-  if (loading || (isAuthenticated && subscriptionQuery.isLoading)) {
+  if (loading || (isAuthenticated && (subscriptionQuery.isLoading || dealershipQuery.isLoading))) {
     return (
       <div className="min-h-screen bg-gradient-to-br from-slate-900 via-slate-800 to-slate-900 flex items-center justify-center">
         <div className="text-white">Loading...</div>
@@ -76,6 +79,15 @@ export default function Documents() {
   };
 
   const documents = documentsQuery.data ?? [];
+  const dealership = dealershipQuery.data;
+  const missingWispFields = [
+    !dealership?.name || dealership.name === "My Dealership" ? "dealership name" : null,
+    !dealership?.address ? "address" : null,
+    !dealership?.city ? "city" : null,
+    !dealership?.state ? "state" : null,
+    !dealership?.qualifiedIndividual ? "Qualified Individual" : null,
+    !dealership?.qiEmail ? "QI email" : null,
+  ].filter(Boolean);
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-slate-900 via-slate-800 to-slate-900">
@@ -106,6 +118,25 @@ export default function Documents() {
               className="bg-amber-600 hover:bg-amber-700"
             >
               Upgrade Now - $199/month
+            </Button>
+          </div>
+        </div>
+      )}
+
+      {missingWispFields.length > 0 && (
+        <div className="border-b border-blue-600 bg-blue-950/30">
+          <div className="container mx-auto px-4 py-4 flex items-center justify-between gap-4">
+            <div className="flex items-start gap-3">
+              <AlertCircle className="text-blue-400 flex-shrink-0 mt-0.5" size={20} />
+              <div>
+                <h3 className="font-semibold text-blue-200">Profile details are missing</h3>
+                <p className="text-sm text-blue-100">
+                  Your WISP will say "My Dealership" or "Not designated" until you complete: {missingWispFields.join(", ")}.
+                </p>
+              </div>
+            </div>
+            <Button onClick={() => setLocation("/profile")} className="bg-blue-600 hover:bg-blue-700">
+              Fix Profile
             </Button>
           </div>
         </div>
