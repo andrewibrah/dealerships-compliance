@@ -30,21 +30,7 @@ jobs:
         env:
           SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
 
-      - name: Set Edge Function Secrets
-        run: |
-          supabase secrets set \
-            SUPABASE_URL=${{ secrets.SUPABASE_URL }} \
-            SUPABASE_ANON_KEY=${{ secrets.SUPABASE_ANON_KEY }} \
-            SUPABASE_SERVICE_ROLE_KEY=${{ secrets.SUPABASE_SERVICE_ROLE_KEY }} \
-            SUPABASE_DB_URL=${{ secrets.SUPABASE_DB_URL }} \
-            ADMIN_EMAIL=${{ secrets.ADMIN_EMAIL }} \
-            STRIPE_SECRET_KEY=${{ secrets.STRIPE_SECRET_KEY }} \
-            STRIPE_WEBHOOK_SECRET=${{ secrets.STRIPE_WEBHOOK_SECRET }} \
-            STRIPE_CORE_PRICE_ID=${{ secrets.STRIPE_CORE_PRICE_ID }} \
-            STRIPE_MANAGED_PRICE_ID=${{ secrets.STRIPE_MANAGED_PRICE_ID }} \
-            RESEND_API_KEY=${{ secrets.RESEND_API_KEY }} \
-            OPENAI_API_KEY=${{ secrets.OPENAI_API_KEY }} \
-            VITE_APP_URL=https://andrewibrah.github.io/dealerships-compliance \
-            --project-ref ${{ secrets.SUPABASE_PROJECT_REF }}
-        env:
-          SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
+      # Edge function runtime secrets (STRIPE_*, ADMIN_EMAIL, etc.) are managed
+      # directly on the Supabase project (dashboard or `supabase secrets set`).
+      # SUPABASE_URL / SUPABASE_*_KEY / SUPABASE_DB_URL are injected automatically
+      # by the platform and cannot be set via `supabase secrets set`.
