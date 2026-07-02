@@ -1,5 +1,10 @@
 # dealerships Compliance Engine - Decisions Log
 
+> **SUPERSEDED (2026):** The Manus scaffold decisions below (Manus OAuth, Manus built-in
+> LLM, MySQL/TiDB) no longer reflect the shipped stack. Production runs on Supabase Auth +
+> Supabase Postgres + Stripe, deployed via GitHub Pages (frontend) and Supabase Edge
+> Functions (API). Entries retained for historical context.
+
 ## [2026-04-14] - Phase 1 - Project Initialization
 **Decision: Use tRPC + Express backend template**
 - Context: CLAUDE.md specifies React 18 + Vite frontend with Supabase backend. Manus provides a web-db-user template with tRPC, Express, and Manus OAuth.
