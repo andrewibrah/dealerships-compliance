@@ -3,18 +3,32 @@ import { Card } from "@/components/ui/card";
 import { CheckCircle2, AlertCircle } from "lucide-react";
 import { useLocation } from "wouter";
 import { useAuth } from "@/hooks/useAuth";
+import { trpc } from "@/lib/trpc";
+import { toast } from "sonner";
 
 export default function Pricing() {
   const [, setLocation] = useLocation();
   const { isAuthenticated } = useAuth();
+
+  const createCheckout = trpc.stripe.createCheckoutSession.useMutation({
+    onSuccess: ({ url }) => {
+      if (url) {
+        window.location.href = url;
+      } else {
+        toast.error("Checkout could not be started. Please try again.");
+      }
+    },
+    onError: (error) => {
+      toast.error("Checkout unavailable: " + error.message);
+    },
+  });
 
   const handleUpgrade = (plan: "core" | "managed") => {
     if (!isAuthenticated) {
       setLocation("/signup");
       return;
     }
-    // TODO: Implement Stripe checkout
-    // await trpc.stripe.createCheckoutSession.mutate({ plan });
+    createCheckout.mutate({ plan });
   };
 
   return (
@@ -116,8 +130,9 @@ export default function Pricing() {
             <Button
               className="w-full bg-amber-600 hover:bg-amber-700"
               onClick={() => handleUpgrade("core")}
+              disabled={createCheckout.isPending}
             >
-              Upgrade to Core
+              {createCheckout.isPending ? "Redirecting to checkout..." : "Upgrade to Core"}
             </Button>
           </Card>
         </div>

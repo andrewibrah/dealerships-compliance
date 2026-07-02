@@ -1,4 +1,4 @@
-# AAND Compliance Engine - Decisions Log
+# dealerships Compliance Engine - Decisions Log
 
 ## [2026-04-14] - Phase 1 - Project Initialization
 **Decision: Use tRPC + Express backend template**
@@ -90,3 +90,19 @@
 - Choice: Use Manus OAuth for login/signup. No additional setup needed.
 - Alternatives considered: Supabase Auth, Auth0.
 - Tradeoff: Manus OAuth is pre-configured. Simpler than alternatives.
+
+## [2026-07-01] - MVP1 Coherence Pass
+**Decision: Single data spine through tRPC; browser Supabase client is auth-only**
+- Context: Wizard/Dashboard queried `compliance_answers.user_id` directly from the browser — a column that does not exist (schema keys on `dealership_id`), and RLS is enabled with no policies, so those calls could never work.
+- Choice: All business data flows through tRPC (`compliance.saveSection` / `getAnswers`), which already existed on both the Express dev server and the production Supabase Edge Function. Client Supabase SDK is used only for auth/session.
+- Alternatives considered: Writing RLS policies and keeping direct browser access.
+- Tradeoff: tRPC keeps end-to-end types and one authorization path; avoids maintaining a parallel RLS policy surface.
+
+**Decision: Runtime-neutral domain code lives in `shared/`**
+- Context: Scoring/questions lived in `client/src`, PDF generation in `server/` only, and the production edge router had no `pdf` router at all.
+- Choice: Moved scoring, safeguards questions, and a rewritten pdf-generator to `shared/`, imported by client (Vite), dev server (Node/esbuild), and edge functions (Deno via `import_map.json`). Added `pdf` router to the edge function and aligned edge Stripe router signatures with `server/routers.ts` (the type source for the client).
+- Tradeoff: The two router copies (`server/routers.ts`, `supabase/functions/_shared/routers.ts`) still must be kept in sync manually; documented in CLAUDE.md.
+
+**Decision: Store storage keys, serve signed URLs; fix Stripe metadata propagation**
+- Context: PDFs were saved with public URLs on a private-by-default bucket, and the webhook read `metadata` from the Stripe subscription object while checkout only set it on the session — so paid subscriptions never activated.
+- Choice: `generated_documents.storage_path` stores the storage key; download URLs are signed per-request (1h TTL). Checkout now sets `subscription_data.metadata` so the webhook can resolve the dealership.

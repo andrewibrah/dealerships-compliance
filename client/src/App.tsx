@@ -5,7 +5,6 @@ import { Router, Route, Switch } from "wouter";
 import ErrorBoundary from "./components/ErrorBoundary";
 import { ThemeProvider } from "./contexts/ThemeContext";
 import Home from "./pages/Home";
-import LandingPage from "./pages/LandingPage";
 import Signup from "./pages/Signup";
 import Login from "./pages/Login";
 import Dashboard from "./pages/Dashboard";
@@ -19,7 +18,7 @@ function AppRouter() {
   return (
     <Router base={base}>
       <Switch>
-        <Route path={"/"} component={LandingPage} />
+        <Route path={"/"} component={Home} />
         <Route path={"/signup"} component={Signup} />
         <Route path={"/login"} component={Login} />
         <Route path={"/dashboard"} component={Dashboard} />

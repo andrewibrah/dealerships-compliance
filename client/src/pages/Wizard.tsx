@@ -3,53 +3,48 @@ import { Progress } from "@/components/ui/progress";
 import { Button } from "@/components/ui/button";
 import { useState, useEffect } from "react";
 import { useLocation } from "wouter";
-import { SAFEGUARDS_SECTIONS } from "@/data/safeguards-questions";
-import { calculateSectionScore, calculateOverallScore } from "@/lib/scoring";
+import { SAFEGUARDS_SECTIONS } from "@shared/safeguards-questions";
+import { calculateSectionScore, calculateOverallScore } from "@shared/scoring";
 import { AlertCircle, CheckCircle2, AlertTriangle, Loader2 } from "lucide-react";
-import { supabase } from "@/lib/supabase";
+import { trpc } from "@/lib/trpc";
 import { useAuth } from "@/hooks/useAuth";
 import { toast } from "sonner";
 
 export default function Wizard() {
   const [, setLocation] = useLocation();
-  const { session, isAuthenticated } = useAuth();
+  const { isAuthenticated } = useAuth();
   const [currentSection, setCurrentSection] = useState(0);
   const [answers, setAnswers] = useState<Record<number, Record<string, any>>>({});
   const [sectionScores, setSectionScores] = useState<Record<number, number>>({});
   const [overallScore, setOverallScore] = useState(0);
   const [riskLevel, setRiskLevel] = useState<"critical" | "high" | "medium" | "low">("critical");
-  const [isSaving, setIsSaving] = useState(false);
-  const [isLoadingAnswers, setIsLoadingAnswers] = useState(true);
 
   const totalSections = SAFEGUARDS_SECTIONS.length;
   const progress = ((currentSection + 1) / totalSections) * 100;
   const section = SAFEGUARDS_SECTIONS[currentSection];
   const sectionNumber = section.number;
 
-  // Load existing answers directly from Supabase
-  useEffect(() => {
-    if (!session?.user?.id) {
-      setIsLoadingAnswers(false);
-      return;
-    }
+  // Load existing answers through the backend (compliance_answers is keyed by dealership)
+  const answersQuery = trpc.compliance.getAnswers.useQuery(undefined, {
+    enabled: isAuthenticated,
+  });
+  const isLoadingAnswers = isAuthenticated && answersQuery.isLoading;
 
-    supabase
-      .from("compliance_answers")
-      .select("section, answers")
-      .eq("user_id", session.user.id)
-      .then(({ data, error }) => {
-        if (error) {
-          console.error("Failed to load answers:", error);
-        } else if (data) {
-          const grouped: Record<number, Record<string, any>> = {};
-          data.forEach((row) => {
-            grouped[row.section] = (row.answers as Record<string, any>) ?? {};
-          });
-          setAnswers(grouped);
-        }
-        setIsLoadingAnswers(false);
-      });
-  }, [session?.user?.id]);
+  useEffect(() => {
+    if (!answersQuery.data) return;
+    const grouped: Record<number, Record<string, any>> = {};
+    answersQuery.data.forEach((row) => {
+      grouped[row.section] = (row.answers as Record<string, any>) ?? {};
+    });
+    setAnswers(grouped);
+  }, [answersQuery.data]);
+
+  const saveSection = trpc.compliance.saveSection.useMutation({
+    onError: (error) => {
+      toast.error("Failed to save answer: " + error.message);
+    },
+  });
+  const isSaving = saveSection.isPending;
 
   // Calculate scores whenever answers change
   useEffect(() => {
@@ -76,8 +71,8 @@ export default function Wizard() {
     }
   }, [answers]);
 
-  const handleAnswer = async (questionId: string, value: any) => {
-    if (!session?.user?.id) {
+  const handleAnswer = (questionId: string, value: any) => {
+    if (!isAuthenticated) {
       toast.error("Please log in to save your answers");
       return;
     }
@@ -93,26 +88,18 @@ export default function Wizard() {
       [sectionNumber]: nextSectionAnswers,
     }));
 
-    // Save directly to Supabase
-    setIsSaving(true);
-    const { error } = await supabase
-      .from("compliance_answers")
-      .upsert(
-        {
-          user_id: session.user.id,
-          section: sectionNumber,
-          section_name: section.name,
-          answers: nextSectionAnswers,
-          updated_at: new Date().toISOString(),
-        },
-        { onConflict: "user_id,section" }
-      );
+    const scoreResult = calculateSectionScore(nextSectionAnswers, section.questions);
+    const completed = section.questions.every(
+      (q) => nextSectionAnswers[q.id] !== undefined && nextSectionAnswers[q.id] !== ""
+    );
 
-    setIsSaving(false);
-    if (error) {
-      console.error("Failed to save answer:", error);
-      toast.error("Failed to save answer: " + error.message);
-    }
+    saveSection.mutate({
+      section: sectionNumber,
+      sectionName: section.name,
+      answers: nextSectionAnswers,
+      score: scoreResult.score,
+      completed,
+    });
   };
 
   const getRiskColor = () => {

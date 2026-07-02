@@ -1,7 +1,9 @@
 import { TRPCError } from 'npm:@trpc/server';
 import { z } from 'npm:zod';
 import * as db from './db.ts';
+import { storageGetSignedUrl } from './storage.ts';
 import { stripeRouter } from './stripe-router.ts';
+import { pdfRouter } from './pdf-router.ts';
 import { ENV } from './env.ts';
 import { router, publicProcedure, protectedProcedure } from './trpc.ts';
 
@@ -173,7 +175,15 @@ const documentsRouter = router({
   getAll: protectedProcedure.query(async ({ ctx }) => {
     const dealership = await db.getDealershipByUserId(ctx.user.id);
     if (!dealership) return [];
-    return db.getGeneratedDocuments(dealership.id);
+    const docs = await db.getGeneratedDocuments(dealership.id);
+    return Promise.all(
+      docs.map(async (doc) => ({
+        ...doc,
+        url: doc.storagePath
+          ? await storageGetSignedUrl(doc.storagePath).catch(() => null)
+          : null,
+      }))
+    );
   }),
   getByType: protectedProcedure
     .input(z.object({ docType: z.string() }))
@@ -204,6 +214,7 @@ export const appRouter = router({
   subscription: subscriptionRouter,
   documents: documentsRouter,
   stripe: stripeRouter,
+  pdf: pdfRouter,
 });
 
 export type AppRouter = typeof appRouter;

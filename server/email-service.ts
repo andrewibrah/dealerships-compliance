@@ -4,24 +4,24 @@ const resend = new Resend(process.env.RESEND_API_KEY);
 
 export async function sendWelcomeEmail(email: string, dealershipName: string) {
   return await resend.emails.send({
-    from: "noreply@aand-compliance.com",
+    from: "noreply@dealerships-compliance.com",
     to: email,
-    subject: "Welcome to AAND Compliance Engine",
+    subject: "Welcome to dealerships Compliance Engine",
     html: `
-      <h1>Welcome to AAND!</h1>
+      <h1>Welcome to dealerships!</h1>
       <p>Hi there,</p>
       <p>Your dealership <strong>${dealershipName}</strong> is now set up and ready to begin the FTC Safeguards compliance assessment.</p>
       <p>Start by answering questions across all 9 compliance sections to get your compliance score and identify gaps.</p>
       <p><a href="${process.env.VITE_APP_URL}/wizard" style="background: #d97706; color: white; padding: 10px 20px; text-decoration: none; border-radius: 5px; display: inline-block;">Start Compliance Wizard</a></p>
       <p>Questions? Contact our support team.</p>
-      <p>Best regards,<br/>AAND Compliance Team</p>
+      <p>Best regards,<br/>dealerships Compliance Team</p>
     `,
   });
 }
 
 export async function sendComplianceReminderEmail(email: string, dealershipName: string, score: number) {
   return await resend.emails.send({
-    from: "noreply@aand-compliance.com",
+    from: "noreply@dealerships-compliance.com",
     to: email,
     subject: `Compliance Update: Your Current Score is ${score}%`,
     html: `
@@ -32,7 +32,7 @@ export async function sendComplianceReminderEmail(email: string, dealershipName:
       ${score >= 60 && score < 80 ? `<p style="color: orange;"><strong>📋 Recommendation:</strong> Continue addressing compliance gaps to improve your score.</p>` : ""}
       ${score >= 80 ? `<p style="color: green;"><strong>✅ Great Progress:</strong> Your dealership is well on its way to full compliance!</p>` : ""}
       <p><a href="${process.env.VITE_APP_URL}/dashboard" style="background: #d97706; color: white; padding: 10px 20px; text-decoration: none; border-radius: 5px; display: inline-block;">View Dashboard</a></p>
-      <p>Best regards,<br/>AAND Compliance Team</p>
+      <p>Best regards,<br/>dealerships Compliance Team</p>
     `,
   });
 }
@@ -41,7 +41,7 @@ export async function sendSubscriptionConfirmationEmail(email: string, dealershi
   const planName = plan === "core" ? "Core ($199/month)" : "Managed";
 
   return await resend.emails.send({
-    from: "noreply@aand-compliance.com",
+    from: "noreply@dealerships-compliance.com",
     to: email,
     subject: `Subscription Confirmed: ${planName} Plan`,
     html: `
@@ -57,14 +57,14 @@ export async function sendSubscriptionConfirmationEmail(email: string, dealershi
         <li>Priority support</li>
       </ul>
       <p><a href="${process.env.VITE_APP_URL}/documents" style="background: #d97706; color: white; padding: 10px 20px; text-decoration: none; border-radius: 5px; display: inline-block;">View Documents</a></p>
-      <p>Best regards,<br/>AAND Compliance Team</p>
+      <p>Best regards,<br/>dealerships Compliance Team</p>
     `,
   });
 }
 
 export async function sendBreachNotificationEmail(email: string, dealershipName: string) {
   return await resend.emails.send({
-    from: "noreply@aand-compliance.com",
+    from: "noreply@dealerships-compliance.com",
     to: email,
     subject: "FTC Safeguards Rule Update - Important Compliance Deadline",
     html: `
@@ -82,7 +82,7 @@ export async function sendBreachNotificationEmail(email: string, dealershipName:
       </ul>
       <p>Non-compliance can result in significant FTC penalties.</p>
       <p><a href="${process.env.VITE_APP_URL}/wizard" style="background: #d97706; color: white; padding: 10px 20px; text-decoration: none; border-radius: 5px; display: inline-block;">Start Assessment</a></p>
-      <p>Best regards,<br/>AAND Compliance Team</p>
+      <p>Best regards,<br/>dealerships Compliance Team</p>
     `,
   });
 }

@@ -1,58 +1,10 @@
 import { describe, it, expect } from "vitest";
-
-// Scoring algorithm tests
-const CRITICAL_WEIGHT = 3;
-const IMPORTANT_WEIGHT = 2;
-const STANDARD_WEIGHT = 1;
-
-function calculateSectionScore(
-  answers: Record<string, any>,
-  questions: Array<{ id: string; weight: "critical" | "important" | "standard"; text: string }>
-) {
-  let totalPoints = 0;
-  let earnedPoints = 0;
-  const gaps: string[] = [];
-  const criticalGaps: string[] = [];
-
-  for (const question of questions) {
-    const weight =
-      question.weight === "critical"
-        ? CRITICAL_WEIGHT
-        : question.weight === "important"
-          ? IMPORTANT_WEIGHT
-          : STANDARD_WEIGHT;
-
-    totalPoints += weight;
-
-    const answer = answers[question.id];
-    if (answer === "yes" || answer === true || answer === 1) {
-      earnedPoints += weight;
-    } else if (answer === "partial" || answer === 0.5) {
-      earnedPoints += weight * 0.5;
-      gaps.push(question.text);
-      if (question.weight === "critical") {
-        criticalGaps.push(question.text);
-      }
-    } else {
-      gaps.push(question.text);
-      if (question.weight === "critical") {
-        criticalGaps.push(question.text);
-      }
-    }
-  }
-
-  const score = totalPoints > 0 ? Math.round((earnedPoints / totalPoints) * 100) : 0;
-
-  return {
-    section: 0,
-    sectionName: "",
-    score,
-    maxPoints: totalPoints,
-    earnedPoints,
-    gaps,
-    criticalGaps,
-  };
-}
+import {
+  calculateSectionScore,
+  CRITICAL_WEIGHT,
+  IMPORTANT_WEIGHT,
+  STANDARD_WEIGHT,
+} from "../shared/scoring";
 
 describe("Scoring Algorithm", () => {
   describe("calculateSectionScore", () => {

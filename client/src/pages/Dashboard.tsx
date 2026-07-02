@@ -4,60 +4,48 @@ import { Progress } from "@/components/ui/progress";
 import { AlertTriangle, CheckCircle2, AlertCircle, TrendingUp, Loader2 } from "lucide-react";
 import { useLocation } from "wouter";
 import { useAuth } from "@/hooks/useAuth";
-import { useState, useEffect } from "react";
-import { supabase } from "@/lib/supabase";
-import { SAFEGUARDS_SECTIONS } from "@/data/safeguards-questions";
-import { calculateSectionScore, calculateOverallScore } from "@/lib/scoring";
+import { trpc } from "@/lib/trpc";
+import { SAFEGUARDS_SECTIONS } from "@shared/safeguards-questions";
+import {
+  calculateSectionScore,
+  calculateOverallScore,
+  type SectionScore,
+} from "@shared/scoring";
 
 export default function Dashboard() {
   const [, setLocation] = useLocation();
-  const { user, session, loading } = useAuth();
-  const [overallScore, setOverallScore] = useState(0);
-  const [sectionScores, setSectionScores] = useState<Record<number, number>>({});
-  const [isLoadingScores, setIsLoadingScores] = useState(true);
+  const { user, isAuthenticated, loading } = useAuth();
 
-  useEffect(() => {
-    if (!session?.user?.id) {
-      setIsLoadingScores(false);
-      return;
-    }
+  const answersQuery = trpc.compliance.getAnswers.useQuery(undefined, {
+    enabled: isAuthenticated,
+  });
+  const isLoadingScores = isAuthenticated && answersQuery.isLoading;
 
-    supabase
-      .from("compliance_answers")
-      .select("section, answers")
-      .eq("user_id", session.user.id)
-      .then(({ data, error }) => {
-        if (error) {
-          console.error("Failed to load compliance answers:", error);
-          setIsLoadingScores(false);
-          return;
-        }
+  const grouped: Record<number, Record<string, any>> = {};
+  (answersQuery.data ?? []).forEach((row) => {
+    grouped[row.section] = (row.answers as Record<string, any>) ?? {};
+  });
 
-        const grouped: Record<number, Record<string, any>> = {};
-        (data ?? []).forEach((row) => {
-          grouped[row.section] = (row.answers as Record<string, any>) ?? {};
-        });
+  const sectionResults: SectionScore[] = SAFEGUARDS_SECTIONS.map((sec) => ({
+    ...calculateSectionScore(grouped[sec.number] || {}, sec.questions),
+    section: sec.number,
+    sectionName: sec.name,
+  }));
 
-        const newScores: Record<number, number> = {};
-        const allScores = [];
+  const sectionScores: Record<number, number> = {};
+  sectionResults.forEach((r) => {
+    sectionScores[r.section] = r.score;
+  });
 
-        for (const sec of SAFEGUARDS_SECTIONS) {
-          const sectionAnswers = grouped[sec.number] || {};
-          const scoreResult = calculateSectionScore(sectionAnswers, sec.questions);
-          newScores[sec.number] = scoreResult.score;
-          allScores.push({ ...scoreResult, section: sec.number, sectionName: sec.name });
-        }
+  const overallScore = calculateOverallScore(sectionResults).overall;
 
-        setSectionScores(newScores);
-
-        if (allScores.length > 0) {
-          const overall = calculateOverallScore(allScores);
-          setOverallScore(overall.overall);
-        }
-
-        setIsLoadingScores(false);
-      });
-  }, [session?.user?.id]);
+  // Owner priorities: worst sections first, critical gaps ahead of standard ones
+  const prioritySections = [...sectionResults]
+    .filter((r) => r.score < 80)
+    .sort(
+      (a, b) =>
+        b.criticalGaps.length - a.criticalGaps.length || a.score - b.score
+    );
 
   if (loading || isLoadingScores) {
     return (
@@ -203,35 +191,60 @@ export default function Dashboard() {
           </div>
         </div>
 
-        {/* Gap Analysis */}
+        {/* Priority Gaps & Next Actions */}
         <Card className="bg-slate-800 border-slate-700 p-8">
           <div className="flex items-center gap-3 mb-6">
             <TrendingUp className="text-amber-500" size={24} />
-            <h2 className="text-2xl font-bold text-white">Gap Analysis</h2>
+            <h2 className="text-2xl font-bold text-white">Priority Gaps &amp; Next Actions</h2>
           </div>
 
-          <div className="space-y-4">
-            {Object.entries(sectionScores)
-              .filter(([, score]) => score < 80)
-              .map(([sectionNum, score]) => {
-                const num = parseInt(sectionNum);
-                const gap = 100 - score;
-                return (
-                  <div key={num} className="border-b border-slate-700 pb-4 last:border-b-0">
-                    <div className="flex justify-between items-center mb-2">
-                      <span className="font-semibold text-slate-200">{sectionNames[num]}</span>
-                      <span className="text-sm text-slate-400">{gap}% gap</span>
-                    </div>
-                    <Progress value={score} className="h-1" />
+          {prioritySections.length === 0 ? (
+            <div className="flex items-center gap-3 text-green-400">
+              <CheckCircle2 size={20} />
+              <p>No significant gaps. Keep your assessment current and re-run it quarterly.</p>
+            </div>
+          ) : (
+            <div className="space-y-6">
+              {prioritySections.map((result) => (
+                <div key={result.section} className="border-b border-slate-700 pb-6 last:border-b-0">
+                  <div className="flex justify-between items-center mb-2">
+                    <span className="font-semibold text-slate-200">
+                      {result.sectionName}
+                      {result.criticalGaps.length > 0 && (
+                        <span className="ml-2 text-xs font-semibold text-red-400">
+                          {result.criticalGaps.length} critical gap{result.criticalGaps.length > 1 ? "s" : ""}
+                        </span>
+                      )}
+                    </span>
+                    <span className="text-sm text-slate-400">{100 - result.score}% gap</span>
                   </div>
-                );
-              })}
-          </div>
+                  <Progress value={result.score} className="h-1 mb-3" />
+                  <ul className="space-y-2">
+                    {(result.criticalGaps.length > 0 ? result.criticalGaps : result.gaps)
+                      .slice(0, 3)
+                      .map((gap) => (
+                        <li key={gap} className="flex items-start gap-2 text-sm text-slate-300">
+                          <AlertTriangle
+                            className={
+                              result.criticalGaps.includes(gap)
+                                ? "text-red-500 flex-shrink-0 mt-0.5"
+                                : "text-yellow-500 flex-shrink-0 mt-0.5"
+                            }
+                            size={14}
+                          />
+                          <span>{gap}</span>
+                        </li>
+                      ))}
+                  </ul>
+                </div>
+              ))}
+            </div>
+          )}
 
           <div className="mt-6 p-4 bg-slate-700/50 rounded-lg">
             <p className="text-sm text-slate-300">
-              Focus on completing sections with the largest gaps. Critical sections (marked with 🔴) should be your
-              highest priority.
+              Start with the critical gaps above — these are the items FTC examiners look for first. Answer the
+              remaining wizard questions to get a complete picture, then generate your WISP and board report.
             </p>
           </div>
         </Card>

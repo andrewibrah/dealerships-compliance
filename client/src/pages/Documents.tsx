@@ -3,15 +3,50 @@ import { Card } from "@/components/ui/card";
 import { AlertCircle, Download, FileText, Lock } from "lucide-react";
 import { useLocation } from "wouter";
 import { useAuth } from "@/hooks/useAuth";
-import { useState } from "react";
+import { trpc } from "@/lib/trpc";
+import { toast } from "sonner";
+
+const DOC_TYPE_LABELS: Record<string, string> = {
+  wisp: "WISP Document",
+  board_report: "Board Report",
+};
 
 export default function Documents() {
   const [, setLocation] = useLocation();
-  const { user, loading } = useAuth();
-  const [isGenerating, setIsGenerating] = useState(false);
-  const [hasSubscription] = useState(false); // TODO: Load from trpc.stripe.getSubscriptionStatus
+  const { user, isAuthenticated, loading } = useAuth();
 
-  if (loading) {
+  const subscriptionQuery = trpc.stripe.getSubscriptionStatus.useQuery(undefined, {
+    enabled: isAuthenticated,
+  });
+  const documentsQuery = trpc.documents.getAll.useQuery(undefined, {
+    enabled: isAuthenticated,
+  });
+
+  const hasSubscription =
+    subscriptionQuery.data != null &&
+    subscriptionQuery.data.plan !== "free" &&
+    subscriptionQuery.data.status === "active";
+
+  const onGenerated = (url: string | null, label: string) => {
+    toast.success(`${label} generated`);
+    documentsQuery.refetch();
+    if (url) window.open(url, "_blank");
+  };
+  const onGenerateError = (message: string) => {
+    toast.error(message);
+  };
+
+  const generateWISP = trpc.pdf.generateWISP.useMutation({
+    onSuccess: (res) => onGenerated(res.url, "WISP"),
+    onError: (e) => onGenerateError(e.message),
+  });
+  const generateBoardReport = trpc.pdf.generateBoardReport.useMutation({
+    onSuccess: (res) => onGenerated(res.url, "Board report"),
+    onError: (e) => onGenerateError(e.message),
+  });
+  const isGenerating = generateWISP.isPending || generateBoardReport.isPending;
+
+  if (loading || (isAuthenticated && subscriptionQuery.isLoading)) {
     return (
       <div className="min-h-screen bg-gradient-to-br from-slate-900 via-slate-800 to-slate-900 flex items-center justify-center">
         <div className="text-white">Loading...</div>
@@ -24,25 +59,23 @@ export default function Documents() {
     return null;
   }
 
-  const handleGenerateWISP = async () => {
+  const handleGenerateWISP = () => {
     if (!hasSubscription) {
       setLocation("/pricing");
       return;
     }
-    setIsGenerating(true);
-    // TODO: Call trpc.pdf.generateWISP.mutate()
-    setTimeout(() => setIsGenerating(false), 2000);
+    generateWISP.mutate();
   };
 
-  const handleGenerateBoardReport = async () => {
+  const handleGenerateBoardReport = () => {
     if (!hasSubscription) {
       setLocation("/pricing");
       return;
     }
-    setIsGenerating(true);
-    // TODO: Call trpc.pdf.generateBoardReport.mutate()
-    setTimeout(() => setIsGenerating(false), 2000);
+    generateBoardReport.mutate();
   };
+
+  const documents = documentsQuery.data ?? [];
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-slate-900 via-slate-800 to-slate-900">
@@ -61,8 +94,11 @@ export default function Documents() {
             <div className="flex items-center gap-3">
               <Lock className="text-amber-500" size={20} />
               <div>
-                <h3 className="font-semibold text-amber-300">Premium Feature</h3>
-                <p className="text-sm text-amber-200">Upgrade to Core plan to generate documents</p>
+                <h3 className="font-semibold text-amber-300">Core plan required</h3>
+                <p className="text-sm text-amber-200">
+                  Document generation is included in the Core plan. Your assessment and gap analysis stay
+                  free.
+                </p>
               </div>
             </div>
             <Button
@@ -94,24 +130,28 @@ export default function Documents() {
             <div className="space-y-3 mb-6">
               <div className="flex items-center gap-2 text-sm text-slate-400">
                 <span className="text-green-500">✓</span>
-                <span>Dealership-specific content</span>
+                <span>Built from your saved assessment answers</span>
               </div>
               <div className="flex items-center gap-2 text-sm text-slate-400">
                 <span className="text-green-500">✓</span>
-                <span>All 9 compliance sections</span>
+                <span>All 9 Safeguards elements with open gaps flagged</span>
               </div>
               <div className="flex items-center gap-2 text-sm text-slate-400">
                 <span className="text-green-500">✓</span>
-                <span>FTC-compliant format</span>
+                <span>Prioritized remediation list</span>
               </div>
             </div>
 
             <Button
               onClick={handleGenerateWISP}
-              disabled={isGenerating || !hasSubscription}
+              disabled={isGenerating}
               className="w-full bg-blue-600 hover:bg-blue-700"
             >
-              {isGenerating ? "Generating..." : "Generate WISP PDF"}
+              {generateWISP.isPending
+                ? "Generating..."
+                : hasSubscription
+                  ? "Generate WISP PDF"
+                  : "Upgrade to generate"}
             </Button>
           </Card>
 
@@ -130,24 +170,28 @@ export default function Documents() {
             <div className="space-y-3 mb-6">
               <div className="flex items-center gap-2 text-sm text-slate-400">
                 <span className="text-green-500">✓</span>
-                <span>Executive summary</span>
+                <span>Executive summary with overall score</span>
               </div>
               <div className="flex items-center gap-2 text-sm text-slate-400">
                 <span className="text-green-500">✓</span>
-                <span>Risk assessment</span>
+                <span>Critical findings by Safeguards element</span>
               </div>
               <div className="flex items-center gap-2 text-sm text-slate-400">
                 <span className="text-green-500">✓</span>
-                <span>Actionable recommendations</span>
+                <span>Recommended actions for the next 90 days</span>
               </div>
             </div>
 
             <Button
               onClick={handleGenerateBoardReport}
-              disabled={isGenerating || !hasSubscription}
+              disabled={isGenerating}
               className="w-full bg-purple-600 hover:bg-purple-700"
             >
-              {isGenerating ? "Generating..." : "Generate Board Report"}
+              {generateBoardReport.isPending
+                ? "Generating..."
+                : hasSubscription
+                  ? "Generate Board Report"
+                  : "Upgrade to generate"}
             </Button>
           </Card>
         </div>
@@ -156,13 +200,51 @@ export default function Documents() {
         <Card className="bg-slate-800 border-slate-700 p-8">
           <h2 className="text-2xl font-bold text-white mb-6">Previously Generated Documents</h2>
 
-          <div className="text-center py-12">
-            <AlertCircle className="mx-auto text-slate-500 mb-4" size={48} />
-            <p className="text-slate-400 mb-4">No documents generated yet</p>
-            <p className="text-sm text-slate-500">
-              Generate your first WISP or Board Report to see them here
-            </p>
-          </div>
+          {documents.length === 0 ? (
+            <div className="text-center py-12">
+              <AlertCircle className="mx-auto text-slate-500 mb-4" size={48} />
+              <p className="text-slate-400 mb-4">No documents generated yet</p>
+              <p className="text-sm text-slate-500">
+                Generate your first WISP or Board Report to see them here
+              </p>
+            </div>
+          ) : (
+            <div className="space-y-3">
+              {[...documents]
+                .sort(
+                  (a, b) =>
+                    new Date(b.generatedAt).getTime() - new Date(a.generatedAt).getTime()
+                )
+                .map((doc) => (
+                  <div
+                    key={doc.id}
+                    className="flex items-center justify-between border border-slate-700 rounded-lg px-4 py-3"
+                  >
+                    <div className="flex items-center gap-3">
+                      <FileText className="text-slate-400" size={20} />
+                      <div>
+                        <p className="text-white font-medium">
+                          {DOC_TYPE_LABELS[doc.docType] ?? doc.docType} (v{doc.version})
+                        </p>
+                        <p className="text-xs text-slate-400">
+                          Generated {new Date(doc.generatedAt).toLocaleString()}
+                        </p>
+                      </div>
+                    </div>
+                    {doc.url ? (
+                      <Button asChild size="sm" variant="outline">
+                        <a href={doc.url} target="_blank" rel="noreferrer">
+                          <Download size={16} className="mr-2" />
+                          Download
+                        </a>
+                      </Button>
+                    ) : (
+                      <span className="text-xs text-slate-500">Download unavailable</span>
+                    )}
+                  </div>
+                ))}
+            </div>
+          )}
         </Card>
 
         {/* Document Information */}

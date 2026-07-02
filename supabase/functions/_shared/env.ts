@@ -10,5 +10,5 @@ export const ENV = {
   stripeManagedPrice: Deno.env.get('STRIPE_MANAGED_PRICE_ID') ?? '',
   resendApiKey: Deno.env.get('RESEND_API_KEY') ?? '',
   openaiApiKey: Deno.env.get('OPENAI_API_KEY') ?? '',
-  appUrl: Deno.env.get('VITE_APP_URL') ?? 'https://andrewibrah.github.io/aand-compliance',
+  appUrl: Deno.env.get('VITE_APP_URL') ?? 'https://andrewibrah.github.io/dealerships-compliance',
 };

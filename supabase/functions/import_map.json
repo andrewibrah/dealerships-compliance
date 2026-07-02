@@ -2,6 +2,7 @@
   "imports": {
     "drizzle-orm": "npm:drizzle-orm",
     "drizzle-orm/pg-core": "npm:drizzle-orm/pg-core",
-    "drizzle-orm/postgres-js": "npm:drizzle-orm/postgres-js"
+    "drizzle-orm/postgres-js": "npm:drizzle-orm/postgres-js",
+    "pdf-lib": "npm:pdf-lib"
   }
 }

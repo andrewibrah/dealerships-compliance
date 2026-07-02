@@ -1,40 +1,40 @@
-# AAND Compliance Engine - Status Log
+# dealerships Compliance Engine - Status Log
 
-## Current Phase: 2 - AUTH + DATABASE
+## Current Phase: MVP1 coherence pass (2026-07-01)
 
-### Phase 1: Scaffold (Day 1)
-**Status:** COMPLETE
+**Status:** Core customer loop wired end-to-end on a single data path.
 
 **Completed:**
-- Project initialized with tRPC + Express + Drizzle ORM template
-- Dependencies installed: pdf-lib, stripe, resend, react-router-dom, @headlessui/react
-- Database schema extended with dealerships, compliance_answers, generated_documents, subscriptions tables
-- Drizzle migration generated (0001_flaky_abomination.sql)
-- React Router configured with 6 main routes
-- All page components created as placeholders
-- Dark theme configured (navy/slate with gold accents)
-- Dev server running and accessible
+- All compliance answer reads/writes go through tRPC (`compliance.getAnswers` / `compliance.saveSection`);
+  removed direct browser Supabase queries that targeted a nonexistent `compliance_answers.user_id` column.
+- Scoring + safeguards questions + PDF generation moved to `shared/` and used by client, dev server, and edge functions.
+- Production edge function (`supabase/functions/trpc`) now includes the `pdf` router; WISP and board report
+  are generated from actual saved answers with gaps and remediation priorities, stored in Supabase Storage,
+  served via signed URLs.
+- Documents page wired to real subscription status, PDF mutations, and the generated-documents list.
+- Pricing page wired to `stripe.createCheckoutSession`; checkout sets `subscription_data.metadata` so the
+  webhook can maintain the `subscriptions` row (this was previously broken — paid users would never unlock).
+- Home page replaced scaffold "Example Page" with a real landing page; scaffold components
+  (ComponentShowcase, AIChatBox, ManusDialog, Map, DashboardLayout, duplicate `_core` useAuth) and the
+  `streamdown` dependency removed. Initial JS bundle dropped from ~1.85 MB to ~950 kB.
+- Tests now exercise the real `shared/scoring.ts` module plus PDF generation smoke tests (9 tests).
 
 **Verification:**
-- npm run dev shows landing page skeleton
-- All TypeScript errors resolved
-- All 6 routes accessible
+- `pnpm check`, `pnpm test`, `pnpm build` all pass.
 
-**Next Phase:**
-- Build useAuth.js hook with Manus OAuth
-- Implement signup/login with database persistence
-- Create profile creation flow
-- Set up Row Level Security (RLS) on database tables
-
----
-
-## Previous Phases
-(None yet)
+**Known gaps / next:**
+- Edge function changes are not locally testable (no Deno installed); verify the `trpc` function deploy
+  and exercise generate-WISP in production after next push to main.
+- No dealership profile UI yet — dealerships are auto-created as "My Dealership" on first save/upgrade;
+  WISP quality improves once dealers can enter name/address/QI.
+- `managed` plan has a price ID env var but no UI presence.
+- RLS is enabled with no policies (intentional: all business data access is service-role via the edge
+  function; browser Supabase client is auth-only).
 
 ---
 
 ## Notes
-- Using Manus OAuth instead of Supabase Auth (built-in to template)
-- Using MySQL + Drizzle ORM (template default) instead of Supabase PostgreSQL
-- Design direction: Dark navy/slate with gold accents for professional, trust-focused appearance
-- All decisions logged in DECISIONS.md
+- Auth: Supabase Auth (email/password). Data: Supabase Postgres via Drizzle. API: tRPC on Supabase Edge
+  Functions (production) / Express (local dev). See CLAUDE.md for the full topology.
+- Design direction: Dark navy/slate with gold accents for professional, trust-focused appearance.
+- Historical phase logs and early template decisions (Manus OAuth, MySQL) are superseded — see DECISIONS.md.

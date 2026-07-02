@@ -26,8 +26,20 @@ export const stripeRouter = router({
   createCheckoutSession: protectedProcedure
     .input(z.object({ plan: z.enum(["core", "managed"]) }))
     .mutation(async ({ ctx, input }) => {
-      const dealership = await db.getDealershipByUserId(ctx.user.id);
-      if (!dealership) throw new Error("No dealership found");
+      // A user can upgrade before saving any answers, so create the dealership if needed
+      const dealership =
+        (await db.getDealershipByUserId(ctx.user.id)) ??
+        (await db.createDealership({
+          userId: ctx.user.id,
+          name: "My Dealership",
+          address: "",
+          city: "",
+          state: "",
+          dmsVendor: "",
+          rooftopCount: 1,
+          qualifiedIndividual: "",
+          qiEmail: "",
+        }));
 
       const priceId = input.plan === "core" ? CORE_PRICE_ID : MANAGED_PRICE_ID;
       if (!priceId) throw new Error("Price not configured");
@@ -63,6 +75,14 @@ export const stripeRouter = router({
         metadata: {
           dealershipId: dealership.id.toString(),
           plan: input.plan,
+        },
+        // The webhook reads metadata off the subscription object, which does not
+        // inherit session metadata unless set explicitly here.
+        subscription_data: {
+          metadata: {
+            dealershipId: dealership.id.toString(),
+            plan: input.plan,
+          },
         },
       });
 

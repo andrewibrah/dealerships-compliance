@@ -2,6 +2,7 @@ import { systemRouter } from './_core/systemRouter';
 import { publicProcedure, router, protectedProcedure } from './_core/trpc';
 import { z } from 'zod';
 import * as db from './db';
+import { storageGetSignedUrl } from './storage';
 import { pdfRouter } from './pdf-router';
 import { stripeRouter } from './stripe-router';
 
@@ -219,7 +220,15 @@ export const appRouter = router({
     getAll: protectedProcedure.query(async ({ ctx }) => {
       const dealership = await db.getDealershipByUserId(ctx.user.id);
       if (!dealership) return [];
-      return db.getGeneratedDocuments(dealership.id);
+      const docs = await db.getGeneratedDocuments(dealership.id);
+      return Promise.all(
+        docs.map(async (doc) => ({
+          ...doc,
+          url: doc.storagePath
+            ? await storageGetSignedUrl(doc.storagePath).catch(() => null)
+            : null,
+        }))
+      );
     }),
 
     getByType: protectedProcedure

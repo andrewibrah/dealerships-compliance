@@ -5,6 +5,8 @@ on:
     branches: [main]
     paths:
       - 'supabase/functions/**'
+      - 'shared/**'
+      - 'drizzle/schema.ts'
   workflow_dispatch:
 
 jobs:
@@ -42,7 +44,7 @@ jobs:
             STRIPE_MANAGED_PRICE_ID=${{ secrets.STRIPE_MANAGED_PRICE_ID }} \
             RESEND_API_KEY=${{ secrets.RESEND_API_KEY }} \
             OPENAI_API_KEY=${{ secrets.OPENAI_API_KEY }} \
-            VITE_APP_URL=https://andrewibrah.github.io/aand-compliance \
+            VITE_APP_URL=https://andrewibrah.github.io/dealerships-compliance \
             --project-ref ${{ secrets.SUPABASE_PROJECT_REF }}
         env:
           SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}

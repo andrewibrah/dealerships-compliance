@@ -40,8 +40,8 @@ jobs:
       - name: Build frontend
         run: pnpm run vercel-build
         env:
-          BASE_PATH: /aand-compliance/
-          VITE_APP_URL: https://andrewibrah.github.io/aand-compliance
+          BASE_PATH: /dealerships-compliance/
+          VITE_APP_URL: https://andrewibrah.github.io/dealerships-compliance
           VITE_API_URL: ${{ secrets.VITE_API_URL }}
           VITE_SUPABASE_URL: ${{ secrets.VITE_SUPABASE_URL }}
           VITE_SUPABASE_ANON_KEY: ${{ secrets.VITE_SUPABASE_ANON_KEY }}

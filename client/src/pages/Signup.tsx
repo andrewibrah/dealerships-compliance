@@ -71,7 +71,7 @@ export default function Signup() {
       <Card className="w-full max-w-md bg-slate-800 border-slate-700">
         <div className="p-8">
           <h1 className="mb-2 text-2xl font-bold text-white">Create Account</h1>
-          <p className="mb-6 text-slate-400">Start your compliance journey with AAND</p>
+          <p className="mb-6 text-slate-400">Start your compliance journey with dealerships</p>
 
           <form onSubmit={handleSignup} className="space-y-4">
             <div className="space-y-2">
