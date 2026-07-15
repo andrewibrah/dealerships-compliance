@@ -5,10 +5,22 @@ import { useState, useEffect } from "react";
 import { useLocation } from "wouter";
 import { SAFEGUARDS_SECTIONS } from "@shared/safeguards-questions";
 import { calculateSectionScore, calculateOverallScore } from "@shared/scoring";
-import { AlertCircle, CheckCircle2, AlertTriangle, Loader2 } from "lucide-react";
+import { AlertCircle, CheckCircle2, AlertTriangle, Loader2, Check } from "lucide-react";
 import { trpc } from "@/lib/trpc";
 import { useAuth } from "@/hooks/useAuth";
 import { toast } from "sonner";
+
+const ANSWER_OPTIONS = {
+  yes_no: [
+    { value: "yes", label: "Yes", selectedClass: "bg-green-600 hover:bg-green-700" },
+    { value: "no", label: "No", selectedClass: "bg-red-600 hover:bg-red-700" },
+  ],
+  yes_no_partial: [
+    { value: "yes", label: "Yes", selectedClass: "bg-green-600 hover:bg-green-700" },
+    { value: "partial", label: "Partial", selectedClass: "bg-yellow-600 hover:bg-yellow-700" },
+    { value: "no", label: "No", selectedClass: "bg-red-600 hover:bg-red-700" },
+  ],
+} as const;
 
 export default function Wizard() {
   const [, setLocation] = useLocation();
@@ -193,15 +205,39 @@ export default function Wizard() {
               <p className="text-slate-400 mb-8">{section.description}</p>
 
               <div className="space-y-8">
-                {section.questions.map((question) => (
+                {section.questions.map((question) => {
+                  const selected = answers[sectionNumber]?.[question.id];
+                  const isText = question.type === "text";
+                  const options =
+                    question.type === "yes_no_partial"
+                      ? ANSWER_OPTIONS.yes_no_partial
+                      : ANSWER_OPTIONS.yes_no;
+
+                  return (
                   <div key={question.id} className="border-b border-slate-700 pb-8 last:border-0">
                     <div className="flex items-start gap-4 mb-4">
                       <div className="flex-1">
-                        <label className="text-white font-medium block mb-2">
-                          {question.text}
-                        </label>
+                        {isText ? (
+                          <label
+                            htmlFor={`q-${question.id}`}
+                            className="text-white font-medium block mb-2"
+                          >
+                            {question.text}
+                          </label>
+                        ) : (
+                          // Not a <label>: its control is a radio group, and <label>
+                          // can only name a single form control.
+                          <span
+                            id={`q-${question.id}-label`}
+                            className="text-white font-medium block mb-2"
+                          >
+                            {question.text}
+                          </span>
+                        )}
                         {question.hint && (
-                          <p className="text-sm text-slate-400 mb-4">{question.hint}</p>
+                          <p id={`q-${question.id}-hint`} className="text-sm text-slate-400 mb-4">
+                            {question.hint}
+                          </p>
                         )}
                       </div>
                       <div
@@ -217,88 +253,54 @@ export default function Wizard() {
                       </div>
                     </div>
 
-                    {question.type === "yes_no" && (
-                      <div className="flex gap-4">
-                        <Button
-                          variant={answers[sectionNumber]?.[question.id] === "yes" ? "default" : "outline"}
-                          className={
-                            answers[sectionNumber]?.[question.id] === "yes"
-                              ? "bg-green-600 hover:bg-green-700"
-                              : ""
-                          }
-                          onClick={() => handleAnswer(question.id, "yes")}
-                          disabled={isSaving}
-                        >
-                          Yes
-                        </Button>
-                        <Button
-                          variant={answers[sectionNumber]?.[question.id] === "no" ? "default" : "outline"}
-                          className={
-                            answers[sectionNumber]?.[question.id] === "no"
-                              ? "bg-red-600 hover:bg-red-700"
-                              : ""
-                          }
-                          onClick={() => handleAnswer(question.id, "no")}
-                          disabled={isSaving}
-                        >
-                          No
-                        </Button>
+                    {!isText && (
+                      <div
+                        role="radiogroup"
+                        aria-labelledby={`q-${question.id}-label`}
+                        aria-describedby={question.hint ? `q-${question.id}-hint` : undefined}
+                        className="flex gap-4"
+                      >
+                        {options.map(({ value, label, selectedClass }) => {
+                          const isOn = selected === value;
+                          return (
+                            <Button
+                              key={value}
+                              type="button"
+                              role="radio"
+                              aria-checked={isOn}
+                              variant={isOn ? "default" : "outline"}
+                              className={isOn ? selectedClass : ""}
+                              onClick={() => handleAnswer(question.id, value)}
+                              disabled={isSaving}
+                            >
+                              {/* Shape channel: selection must not rest on hue alone.
+                                  Reserved when unselected so the row does not reflow. */}
+                              <Check
+                                aria-hidden="true"
+                                className={isOn ? "size-4" : "size-4 invisible"}
+                              />
+                              {label}
+                            </Button>
+                          );
+                        })}
                       </div>
                     )}
 
-                    {question.type === "yes_no_partial" && (
-                      <div className="flex gap-4">
-                        <Button
-                          variant={answers[sectionNumber]?.[question.id] === "yes" ? "default" : "outline"}
-                          className={
-                            answers[sectionNumber]?.[question.id] === "yes"
-                              ? "bg-green-600 hover:bg-green-700"
-                              : ""
-                          }
-                          onClick={() => handleAnswer(question.id, "yes")}
-                          disabled={isSaving}
-                        >
-                          Yes
-                        </Button>
-                        <Button
-                          variant={answers[sectionNumber]?.[question.id] === "partial" ? "default" : "outline"}
-                          className={
-                            answers[sectionNumber]?.[question.id] === "partial"
-                              ? "bg-yellow-600 hover:bg-yellow-700"
-                              : ""
-                          }
-                          onClick={() => handleAnswer(question.id, "partial")}
-                          disabled={isSaving}
-                        >
-                          Partial
-                        </Button>
-                        <Button
-                          variant={answers[sectionNumber]?.[question.id] === "no" ? "default" : "outline"}
-                          className={
-                            answers[sectionNumber]?.[question.id] === "no"
-                              ? "bg-red-600 hover:bg-red-700"
-                              : ""
-                          }
-                          onClick={() => handleAnswer(question.id, "no")}
-                          disabled={isSaving}
-                        >
-                          No
-                        </Button>
-                      </div>
-                    )}
-
-                    {question.type === "text" && (
+                    {isText && (
                       <textarea
+                        id={`q-${question.id}`}
+                        aria-describedby={question.hint ? `q-${question.id}-hint` : undefined}
                         className="w-full bg-slate-900 border border-slate-600 rounded px-3 py-2 text-white placeholder-slate-500"
                         placeholder="Enter your response..."
-                        value={answers[sectionNumber]?.[question.id] || ""}
+                        value={selected || ""}
                         onChange={(e) => handleAnswer(question.id, e.target.value)}
                         rows={3}
                         disabled={isSaving}
                       />
                     )}
                   </div>
-                ))}
+                  );
+                })}
               </div>
             </Card>
           </div>
