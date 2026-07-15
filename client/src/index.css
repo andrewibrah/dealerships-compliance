@@ -99,7 +99,9 @@
   --destructive-foreground: oklch(0.985 0 0);
   --border: oklch(1 0 0 / 10%);
   --input: oklch(1 0 0 / 15%);
-  --ring: oklch(0.488 0.243 264.376);
+  /* blue-400: reaches 3:1 (WCAG 1.4.11) against the slate-800/900 surfaces
+     this theme renders on. Do not darken or re-apply alpha. */
+  --ring: oklch(0.707 0.165 254.624);
   --chart-1: var(--color-blue-300);
   --chart-2: var(--color-blue-500);
   --chart-3: var(--color-blue-600);
