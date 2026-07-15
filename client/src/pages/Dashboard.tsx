@@ -112,7 +112,7 @@ export default function Dashboard() {
             <Button variant="outline" onClick={() => setLocation("/profile")}>
               Dealership Profile
             </Button>
-            <Button onClick={() => setLocation("/wizard")} className="bg-amber-600 hover:bg-amber-700">
+            <Button onClick={() => setLocation("/wizard")} className="bg-amber-600 hover:bg-amber-500 text-slate-950">
               Continue Assessment
             </Button>
           </div>
@@ -131,7 +131,7 @@ export default function Dashboard() {
                 </p>
               </div>
             </div>
-            <Button onClick={() => setLocation("/profile")} className="bg-amber-600 hover:bg-amber-700">
+            <Button onClick={() => setLocation("/profile")} className="bg-amber-600 hover:bg-amber-500 text-slate-950">
               Complete Profile
             </Button>
           </div>
@@ -182,7 +182,7 @@ export default function Dashboard() {
               <Button
                 size="sm"
                 onClick={() => setLocation("/documents")}
-                className="bg-amber-600 hover:bg-amber-700 w-full"
+                className="bg-amber-600 hover:bg-amber-500 text-slate-950 w-full"
               >
                 Generate Documents
               </Button>

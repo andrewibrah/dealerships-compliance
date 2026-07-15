@@ -24,7 +24,7 @@ export default function Home() {
               Pricing
             </Button>
             {isAuthenticated ? (
-              <Button className="bg-amber-600 hover:bg-amber-700" onClick={() => setLocation("/dashboard")}>
+              <Button className="bg-amber-600 hover:bg-amber-500 text-slate-950" onClick={() => setLocation("/dashboard")}>
                 Dashboard
               </Button>
             ) : (
@@ -32,7 +32,7 @@ export default function Home() {
                 <Button variant="ghost" className="text-slate-300" onClick={() => setLocation("/login")}>
                   Log in
                 </Button>
-                <Button className="bg-amber-600 hover:bg-amber-700" onClick={() => setLocation("/signup")}>
+                <Button className="bg-amber-600 hover:bg-amber-500 text-slate-950" onClick={() => setLocation("/signup")}>
                   Get Started
                 </Button>
               </>
@@ -55,7 +55,7 @@ export default function Home() {
           enforcement risk, and generate the WISP and board report your examiners and auditors expect.
         </p>
         <div className="flex justify-center gap-4">
-          <Button size="lg" className="bg-amber-600 hover:bg-amber-700" onClick={primaryCta}>
+          <Button size="lg" className="bg-amber-600 hover:bg-amber-500 text-slate-950" onClick={primaryCta}>
             {isAuthenticated ? "Go to your dashboard" : "Start free assessment"}
           </Button>
           <Button size="lg" variant="outline" onClick={() => setLocation("/pricing")}>

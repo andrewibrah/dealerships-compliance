@@ -236,7 +236,7 @@ export default function Profile() {
               <Button type="button" variant="outline" onClick={() => setLocation("/dashboard")}>
                 Cancel
               </Button>
-              <Button type="submit" disabled={isSaving} className="bg-amber-600 hover:bg-amber-700">
+              <Button type="submit" disabled={isSaving} className="bg-amber-600 hover:bg-amber-500 text-slate-950">
                 {isSaving ? "Saving..." : "Save Profile"}
               </Button>
             </div>

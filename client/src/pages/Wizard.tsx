@@ -153,7 +153,7 @@ export default function Wizard() {
             You need to be logged in to access the compliance wizard.
           </p>
           <Button
-            className="w-full bg-amber-600 hover:bg-amber-700"
+            className="w-full bg-amber-600 hover:bg-amber-500 text-slate-950"
             onClick={() => setLocation("/login")}
           >
             Go to Login
@@ -362,7 +362,7 @@ export default function Wizard() {
                 Previous
               </Button>
               <Button
-                className="flex-1 bg-amber-600 hover:bg-amber-700"
+                className="flex-1 bg-amber-600 hover:bg-amber-500 text-slate-950"
                 onClick={() => {
                   if (currentSection === totalSections - 1) {
                     setLocation("/dashboard");

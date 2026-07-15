@@ -115,7 +115,7 @@ export default function Documents() {
             </div>
             <Button
               onClick={() => setLocation("/pricing")}
-              className="bg-amber-600 hover:bg-amber-700"
+              className="bg-amber-600 hover:bg-amber-500 text-slate-950"
             >
               Upgrade Now - $199/month
             </Button>

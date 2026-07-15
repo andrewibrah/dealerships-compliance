@@ -87,7 +87,7 @@ export default function Pricing() {
           {/* Core Plan */}
           <Card className="bg-amber-950/30 border-2 border-amber-600 p-8 flex flex-col ring-2 ring-amber-600/20">
             <div className="mb-4 inline-block">
-              <span className="bg-amber-600 text-white px-3 py-1 rounded-full text-sm font-semibold">
+              <span className="bg-amber-600 text-slate-950 px-3 py-1 rounded-full text-sm font-semibold">
                 Most Popular
               </span>
             </div>
@@ -128,7 +128,7 @@ export default function Pricing() {
             </ul>
 
             <Button
-              className="w-full bg-amber-600 hover:bg-amber-700"
+              className="w-full bg-amber-600 hover:bg-amber-500 text-slate-950"
               onClick={() => handleUpgrade("core")}
               disabled={createCheckout.isPending}
             >

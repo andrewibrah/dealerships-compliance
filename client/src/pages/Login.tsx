@@ -99,7 +99,7 @@ export default function Login() {
             <Button
               type="submit"
               disabled={submitting}
-              className="w-full bg-amber-600 hover:bg-amber-700 text-white font-bold py-6"
+              className="w-full bg-amber-600 hover:bg-amber-500 text-slate-950 font-bold py-6"
             >
               {submitting ? 'Signing in...' : 'Sign In'}
             </Button>
