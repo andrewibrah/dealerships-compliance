@@ -1,6 +1,7 @@
 import { describe, it, expect } from "vitest";
 import {
   calculateSectionScore,
+  calculateOverallScore,
   CRITICAL_WEIGHT,
   IMPORTANT_WEIGHT,
   STANDARD_WEIGHT,
@@ -100,6 +101,84 @@ describe("Scoring Algorithm", () => {
       const expectedMax = CRITICAL_WEIGHT + IMPORTANT_WEIGHT + STANDARD_WEIGHT;
       expect(result.maxPoints).toBe(expectedMax);
       expect(result.earnedPoints).toBe(expectedMax);
+    });
+  });
+
+  describe("calculateOverallScore", () => {
+    it("should calculate overall score from section scores", () => {
+      const sectionScores = [
+        {
+          section: 1,
+          sectionName: "Section 1",
+          score: 100,
+          maxPoints: 10,
+          earnedPoints: 10,
+          gaps: [],
+          criticalGaps: [],
+        },
+        {
+          section: 2,
+          sectionName: "Section 2",
+          score: 50,
+          maxPoints: 10,
+          earnedPoints: 5,
+          gaps: [],
+          criticalGaps: [],
+        },
+      ];
+
+      const result = calculateOverallScore(sectionScores);
+
+      // Both sections have equal weight (not in high-enforcement list)
+      // (10 + 5) / (10 + 10) = 75%
+      expect(result.overall).toBe(75);
+    });
+
+    it("should apply 1.5x multiplier to high-enforcement sections", () => {
+      const sectionScores = [
+        {
+          section: 4, // Access Controls (high-enforcement)
+          sectionName: "Access Controls",
+          score: 100,
+          maxPoints: 10,
+          earnedPoints: 10,
+          gaps: [],
+          criticalGaps: [],
+        },
+        {
+          section: 1, // Qualified Individual (normal)
+          sectionName: "Qualified Individual",
+          score: 0,
+          maxPoints: 10,
+          earnedPoints: 0,
+          gaps: [],
+          criticalGaps: [],
+        },
+      ];
+
+      const result = calculateOverallScore(sectionScores);
+
+      // (10 * 1.5 + 0) / (10 * 1.5 + 10) = 15 / 25 = 60%
+      expect(result.overall).toBe(60);
+    });
+
+    it("should determine risk level based on score", () => {
+      const atScore = (score: number, earnedPoints: number) => [
+        {
+          section: 1,
+          sectionName: "S1",
+          score,
+          maxPoints: 10,
+          earnedPoints,
+          gaps: [],
+          criticalGaps: [],
+        },
+      ];
+
+      expect(calculateOverallScore(atScore(30, 3)).riskLevel).toBe("critical");
+      expect(calculateOverallScore(atScore(50, 5)).riskLevel).toBe("high");
+      expect(calculateOverallScore(atScore(70, 7)).riskLevel).toBe("medium");
+      expect(calculateOverallScore(atScore(90, 9)).riskLevel).toBe("low");
     });
   });
 });

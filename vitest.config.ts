@@ -21,7 +21,10 @@ export default defineConfig({
     include: [
       "server/**/*.test.ts",
       "server/**/*.spec.ts",
+      "client/src/**/*.test.ts",
       "client/src/**/*.test.tsx",
     ],
+    // Nothing under client/src is excluded: a narrow glob is what let a broken
+    // test sit undetected here for months.
   },
 });
