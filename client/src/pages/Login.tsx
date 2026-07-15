@@ -61,10 +61,13 @@ export default function Login() {
               <Input
                 id="email"
                 type="email"
+                autoComplete="email"
                 value={email}
                 onChange={(e) => setEmail(e.target.value)}
                 placeholder="you@example.com"
                 required
+                aria-invalid={!!error}
+                aria-describedby={error ? 'login-error' : undefined}
                 className="bg-slate-900 border-slate-600 text-white placeholder:text-slate-500"
               />
             </div>
@@ -74,15 +77,24 @@ export default function Login() {
               <Input
                 id="password"
                 type="password"
+                autoComplete="current-password"
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
                 placeholder="••••••••"
                 required
+                aria-invalid={!!error}
+                aria-describedby={error ? 'login-error' : undefined}
                 className="bg-slate-900 border-slate-600 text-white placeholder:text-slate-500"
               />
             </div>
 
-            {error && <p className="text-red-400 text-sm">{error}</p>}
+            {/* role="alert" carries an implicit aria-live="assertive"; the node is
+                conditionally mounted, so it announces on mount. */}
+            {error && (
+              <p id="login-error" role="alert" className="text-red-400 text-sm">
+                {error}
+              </p>
+            )}
 
             <Button
               type="submit"

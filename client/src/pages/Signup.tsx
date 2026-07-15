@@ -81,6 +81,7 @@ export default function Signup() {
               <Input
                 id="name"
                 type="text"
+                autoComplete="name"
                 value={name}
                 onChange={(e) => setName(e.target.value)}
                 placeholder="Your name"
@@ -93,10 +94,13 @@ export default function Signup() {
               <Input
                 id="email"
                 type="email"
+                autoComplete="email"
                 value={email}
                 onChange={(e) => setEmail(e.target.value)}
                 placeholder="you@example.com"
                 required
+                aria-invalid={!!error}
+                aria-describedby={error ? 'signup-error' : undefined}
                 className="bg-slate-900 border-slate-600 text-white placeholder:text-slate-500"
               />
             </div>
@@ -106,16 +110,25 @@ export default function Signup() {
               <Input
                 id="password"
                 type="password"
+                autoComplete="new-password"
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
                 placeholder="Min 8 characters"
                 required
                 minLength={8}
+                aria-invalid={!!error}
+                aria-describedby={error ? 'signup-error' : undefined}
                 className="bg-slate-900 border-slate-600 text-white placeholder:text-slate-500"
               />
             </div>
 
-            {error && <p className="text-red-400 text-sm">{error}</p>}
+            {/* role="alert" carries an implicit aria-live="assertive"; the node is
+                conditionally mounted, so it announces on mount. */}
+            {error && (
+              <p id="signup-error" role="alert" className="text-red-400 text-sm">
+                {error}
+              </p>
+            )}
 
             <Button
               type="submit"
