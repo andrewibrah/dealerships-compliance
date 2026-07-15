@@ -4,7 +4,21 @@
 **Method:** Static source audit + computed colorimetry. No runtime/AT testing performed (see §6).
 **Commit audited:** `8bd2012` (branch `main`)
 **Scope:** `client/` React SPA (Home, Signup, Login, Wizard, Dashboard, Documents, Pricing, Profile, NotFound), `client/index.html`, `client/src/index.css`, `shared/pdf-generator.ts` (generated WISP / board-report PDFs).
-**Date:** 2026-07-14
+**Date:** 2026-07-14 (findings) / 2026-07-15 (Phase 1 remediation + corrections)
+
+## Remediation status
+
+| ID | Finding | Severity | Status |
+|---|---|---|---|
+| A11Y-01 | Focus indicator invisible (1.4.11) | BLOCKER | **Fixed** 2026-07-15 — ring now 5.56:1 / 6.77:1 |
+| A11Y-02 | Auth errors unannounced; no `autocomplete` (3.3.1 / 4.1.3 / 1.3.5 / 3.3.8) | BLOCKER | **Fixed** 2026-07-15 |
+| A11Y-03 | Wizard answers not a radio group (4.1.2 / 1.4.1 / 3.3.2) | BLOCKER | **Fixed** 2026-07-15 |
+| A11Y-04 | Amber CTA contrast (1.4.3) | MAJOR | **Fixed** 2026-07-15 — 6.32:1 rest / 9.40:1 hover |
+| — | Everything else below | — | **Open** |
+
+Each fix carries a regression test under `client/src/__a11y__/`. Conformance is
+still **not** claimed for any flow: the remaining findings are open, and nothing
+here has been validated against a real screen reader (§6).
 
 > **Scope note:** the audit request's SCOPE block was left as an unfilled placeholder. This audit covers the repository it was run in. It does **not** cover the deployed GitHub Pages instance, Supabase-hosted auth screens (Supabase's own email templates and any hosted auth UI are third-party surfaces), or Stripe Checkout — **Stripe Checkout is inside the core conversion flow and is unaudited.** See §6.
 
@@ -29,7 +43,7 @@ All contrast ratios below are **computed**, not estimated: Tailwind v4 oklch sou
 
 | WCAG SC # | Level | File:line | What fails | User impact | Fix (exact code) |
 |---|---|---|---|---|---|
-| **1.4.3 Contrast (Minimum)** | AA | `client/src/pages/Home.tsx:58`, `Login.tsx:90`, `Signup.tsx:123`, `Dashboard.tsx:115,134,185`, `Wizard.tsx:144,363`, `Documents.tsx:117` | Primary CTA is `bg-amber-600` + `text-white` = **3.19:1**. Required 4.5:1 (label is 14px `font-bold` — below the 18.66px bold large-text threshold, so 3:1 does **not** apply). | The single most-clicked control on every page — "Start free assessment", "Sign In", "Create Account", "Continue Assessment", "Generate Documents" — fails. Affects the entire conversion flow. | Keep brand amber, flip the label: `bg-amber-600 text-slate-950` = **6.32:1**. (Alternative preserving white text: `bg-amber-700 text-white` = 5.05:1, but darker.) Recommend the former — §3. |
+| **1.4.3 Contrast (Minimum)** | AA | `client/src/pages/Home.tsx:58`, `Login.tsx:90`, `Signup.tsx:123`, `Dashboard.tsx:115,134,185`, `Wizard.tsx:144,363`, `Documents.tsx:117` | **[CORRECTED 2026-07-15 — see note]** 14 `bg-amber-600` call sites, two distinct failures, both under the required 4.5:1 (label is 14px `font-bold` — below the 18.66px bold large-text threshold, so 3:1 does **not** apply): 3 sites set `text-white` explicitly → **3.19:1**; the other 11 set no foreground, so the shadcn Button default `text-primary-foreground` applies, which this theme maps to **blue-50 → 2.93:1**. | The single most-clicked control on every page — "Start free assessment", "Sign In", "Create Account", "Continue Assessment", "Generate Documents" — fails. Affects the entire conversion flow. | Keep brand amber, flip the label **and lighten the hover**: `bg-amber-600 hover:bg-amber-500 text-slate-950` → **6.32:1** at rest, **9.40:1** on hover — §3. |
 | **1.4.3 Contrast (Minimum)** | AA | `Login.tsx:68,81,115`; `Signup.tsx:87,100,114,170`; `Home.tsx:100`; `Wizard.tsx:292` | `placeholder:text-slate-500` and `text-slate-500` on `bg-slate-900` = **3.74:1**. Required 4.5:1. Affects both auth-form placeholders, the Terms/Privacy microcopy, and the Home footer. | Low-vision users cannot read input placeholders on the login and signup forms, or the ToS notice they are legally deemed to accept. | `slate-500` → `slate-400` (`#90a1b9`) = **6.79:1** on slate-900. |
 | **1.4.3 Contrast (Minimum)** | AA | `Wizard.tsx:113,342`; `Dashboard.tsx:82,208,271` | `text-red-500` on `bg-slate-800` = **3.84:1** where used for **small bold** text (the per-section score `%`, `Wizard.tsx:336-346`). Required 4.5:1. (The same colour on the 3xl/5xl risk headline is large text → 3.84:1 **passes** 3:1 there.) | The worst-scoring sections — the ones the user most needs to read — are the least readable. | `text-red-500` → `text-red-400` (`#ff6467`) = **5.07:1**. Large headline may keep red-500. |
 | **1.4.11 Non-text Contrast** | AA | `Login.tsx:68,81`; `Signup.tsx:87,100,114`; `Wizard.tsx:292` (`border-slate-600`); `Home.tsx:16,70`, `Dashboard.tsx:103,200`, `Wizard.tsx:191` (`border-slate-700`) | Input borders `slate-600` on `slate-900` = **2.36:1**; on `slate-800` = **1.94:1**. Card borders `slate-700` on `slate-800` = **1.42:1**; dividers on `slate-900` = **1.73:1**. Required 3:1. | Users with low vision cannot see where the email/password fields *are* — the input boundary is the only affordance. Blocks form perception at the top of the funnel. | Input borders → `border-slate-500` (3.74:1 on slate-900 / 3.07:1 on slate-800). Note: **decorative** card borders/dividers are exempt from 1.4.11 (they convey no state); fixing inputs is the compliance-relevant part. Recommend `slate-500` on inputs only. |
@@ -210,13 +224,22 @@ Brand identity here is **amber on slate**. Both survive. Every value below is co
 
 | Token / class | Current | Ratio | Replace with | New ratio |
 |---|---|---|---|---|
-| Primary CTA | `bg-amber-600 text-white` | 3.19:1 ❌ | `bg-amber-600 text-slate-950` | **6.32:1** ✅ |
+| Primary CTA (label) | `bg-amber-600 text-white` | 3.19:1 ❌ | `bg-amber-600 text-slate-950` | **6.32:1** ✅ |
+| Primary CTA (no explicit fg — 11 of 14 sites) | `bg-amber-600` + inherited `text-primary-foreground` (blue-50) | 2.93:1 ❌ | `bg-amber-600 text-slate-950` | **6.32:1** ✅ |
+| Primary CTA (hover) | `hover:bg-amber-700` + `text-slate-950` | 3.99:1 ❌ | `hover:bg-amber-500` | **9.40:1** ✅ |
 | Focus ring (`index.css:102`) | `oklch(0.488 0.243 264.376)` @ 50% | 1.57:1 ❌ | `oklch(70.7% 0.165 254.624)` (blue-400) **at full opacity** | **5.56:1** ✅ |
 | Muted text / placeholders | `slate-500` `#62748e` | 3.74:1 ❌ | `slate-400` `#90a1b9` | **6.79:1** ✅ |
 | Input borders | `slate-600` `#45556c` | 2.36:1 ❌ | `slate-500` `#62748e` | **3.74:1** ✅ |
 | Small bold score text (red) | `red-500` `#fb2c36` | 3.84:1 ❌ | `red-400` `#ff6467` | **5.07:1** ✅ |
 
 The amber CTA fix is the important one for brand: **keep `amber-600` as the fill** and darken the label. That preserves the exact brand hue on the most visible element while going from a fail to a comfortable pass.
+
+> **Correction, 2026-07-15.** Two errors in the original draft of this audit, both of which understated the problem — recorded here rather than silently overwritten, since this document is meant to be discoverable by opposing counsel and its revision history matters:
+>
+> 1. The CTA finding reported **3.19:1**, derived from `text-white`. Only 3 of the 14 `bg-amber-600` call sites actually set `text-white`. The other 11 inherit the Button default `text-primary-foreground`, which this theme maps to blue-50 — **2.93:1**, worse than reported.
+> 2. The recommended fix kept `hover:bg-amber-700`. With `text-slate-950` that computes to **3.99:1** — it would have passed at rest and failed on hover, since hover is a state the label is read in. The corrected fix lightens the hover to `amber-500`.
+>
+> Both were caught by the regression test (`client/src/__a11y__/amber-cta.test.tsx`) during remediation, which is the argument for computing ratios in CI rather than transcribing them into a document.
 
 ### 3.2 Status colours — hue alone cannot carry these
 
