@@ -37,6 +37,19 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
+      # Gate. Until this existed, the workflow went straight from install to
+      # deploy: any change that merely compiled shipped to production, so a
+      # green run meant "deployed", not "correct". These steps run before the
+      # build, so a failure stops the deploy instead of publishing the break.
+      - name: Lint (accessibility guard)
+        run: pnpm run lint
+
+      - name: Typecheck
+        run: pnpm run check
+
+      - name: Test
+        run: pnpm test
+
       - name: Build frontend
         run: pnpm run vercel-build
         env:
