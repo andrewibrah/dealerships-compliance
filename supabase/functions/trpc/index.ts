@@ -4,6 +4,7 @@ import { getUserFromToken } from '../_shared/supabase.ts';
 import * as db from '../_shared/db.ts';
 import { ENV } from '../_shared/env.ts';
 import { appRouter } from '../_shared/routers.ts';
+import { decodeAalFromJwt, hasVerifiedFactor } from '../../../shared/mfa.ts';
 
 Deno.serve(async (req: Request) => {
   const corsResponse = handleCors(req);
@@ -18,6 +19,8 @@ Deno.serve(async (req: Request) => {
       const token = authHeader?.split(' ')[1];
       const authUser = token ? await getUserFromToken(token) : null;
       let user = null;
+      let aal = null;
+      let verifiedFactor = false;
 
       if (authUser?.email) {
         const normalizedEmail = authUser.email.trim().toLowerCase();
@@ -33,9 +36,11 @@ Deno.serve(async (req: Request) => {
           name: displayName,
           role,
         });
+        aal = decodeAalFromJwt(token);
+        verifiedFactor = hasVerifiedFactor(authUser.factors);
       }
 
-      return { user };
+      return { user, aal, hasVerifiedFactor: verifiedFactor };
     },
     onError: ({ error }) => {
       console.error('tRPC error:', error);

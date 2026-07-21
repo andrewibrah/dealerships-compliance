@@ -8,6 +8,7 @@ import { useLocation } from "wouter";
 import { useAuth } from "@/hooks/useAuth";
 import { trpc } from "@/lib/trpc";
 import { toast } from "sonner";
+import { MfaEnrollment } from "@/components/MfaEnrollment";
 
 const emailPattern = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
@@ -241,6 +242,10 @@ export default function Profile() {
               </Button>
             </div>
           </form>
+
+          <div className="mt-8 border-t border-slate-700 pt-8">
+            <MfaEnrollment />
+          </div>
         </Card>
       </div>
     </div>

@@ -17,6 +17,8 @@ function createAuthContext(): { ctx: TrpcContext } {
 
   const ctx: TrpcContext = {
     user,
+    aal: "aal2",
+    hasVerifiedFactor: false,
     req: {
       protocol: "https",
       headers: {},

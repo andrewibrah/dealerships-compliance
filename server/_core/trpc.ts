@@ -1,4 +1,5 @@
-import { NOT_ADMIN_ERR_MSG, UNAUTHED_ERR_MSG } from '@shared/const';
+import { MFA_REQUIRED_ERR_MSG, NOT_ADMIN_ERR_MSG, UNAUTHED_ERR_MSG } from '@shared/const';
+import { requiresMfaStepUp } from '@shared/mfa';
 import { initTRPC, TRPCError } from "@trpc/server";
 import superjson from "superjson";
 import type { TrpcContext } from "./context";
@@ -15,6 +16,10 @@ const requireUser = t.middleware(async opts => {
 
   if (!ctx.user) {
     throw new TRPCError({ code: "UNAUTHORIZED", message: UNAUTHED_ERR_MSG });
+  }
+
+  if (requiresMfaStepUp({ aal: ctx.aal, hasVerifiedFactor: ctx.hasVerifiedFactor })) {
+    throw new TRPCError({ code: "UNAUTHORIZED", message: MFA_REQUIRED_ERR_MSG });
   }
 
   return next({
