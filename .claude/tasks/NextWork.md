@@ -6,6 +6,11 @@ The app-layer tenant-guard is already live and tested; the RLS policies + the fl
 authenticated-scoping executor are written but **not applied and not enabled**. This session turns
 the DB-level "hard isolation" on, safely, with staging validation. PRD #46 — High.
 
+> **Deploy state (as of 2026-07-21, commit `5f6efe0`):** the code is already **deployed to prod** —
+> the app-layer tenant-guard is LIVE, and the Edge Functions ship the flag-gated `scoped()` executor
+> with **`RLS_ENFORCED` OFF**. So the runbook below starts at "apply `0003`", not at a code deploy.
+> Migration `0003` is **not yet applied** to any DB, and the flag is off everywhere.
+
 ## Cold-start context (what 0002 shipped)
 - **App-layer guard is LIVE.** Business reads/writes of the crown-jewel tables (`compliance_answers`,
   `generated_documents`) funnel through `resolveTenantScope(db, ctx.user.id)` and require a branded

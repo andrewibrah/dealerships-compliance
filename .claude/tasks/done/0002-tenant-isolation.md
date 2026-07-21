@@ -139,3 +139,21 @@ Caught by the independent review gate; renamed to `0003_*`. Also synced a pre-ex
    *all* app business queries are authenticated-scoped, not just crown-jewel.
 4. Out of scope, pre-existing (noted by verifier): `getDocumentUrl` lacks `ORDER BY`; `getDb()`
    opens a client per call without `end()`.
+
+---
+
+## Deploy (2026-07-21, on Andrew's explicit go)
+- **Committed** `5f6efe0` on `main` (18 files, +906/−333) and **pushed** to
+  `origin/main` (`6939c50..5f6efe0`).
+- **Edge Functions auto-deploy via CI**: `deploy-functions.yml` triggers on push to `main` for
+  `supabase/functions/**` / `shared/**` / `drizzle/schema.ts` (all changed) → deploys `trpc`,
+  `stripe-webhook`, `handle-signup`. Watch: github.com/andrewibrah/dealerships-compliance/actions.
+- **`RLS_ENFORCED` left OFF** (not set) → deployed code behaves as before + app-layer guard live;
+  RLS role-switch dormant. Deliberate: flipping it needs the staging `SET ROLE` validation.
+- **Migration `0003` NOT applied** — CI does not run migrations, and the `supabase` CLI is not
+  logged in on this machine (no `~/.supabase`, no `SUPABASE_ACCESS_TOKEN`). Handed to Andrew:
+  either `supabase db push` (after `supabase login` + `link --project-ref vlluemlwsymvbdsdbexz`)
+  or paste `supabase/migrations/0003_tenant_isolation_rls.sql` into the Supabase SQL editor. It is
+  safe to apply anytime (service_role bypasses RLS).
+- **Prod state after this push:** app-layer tenant-guard LIVE in prod; RLS policies not yet in the
+  DB; `RLS_ENFORCED` off. Consistent and safe.
