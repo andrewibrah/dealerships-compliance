@@ -1,5 +1,5 @@
 import {
-  pgTable, pgEnum, uuid, varchar, text, integer, boolean,
+  pgTable, pgEnum, uuid, varchar, text, integer, bigint, boolean,
   timestamp, jsonb, unique, index,
 } from 'drizzle-orm/pg-core';
 
@@ -66,6 +66,31 @@ export const generatedDocuments = pgTable('generated_documents', {
   generatedAt: timestamp('generated_at').notNull().defaultNow(),
 }, (t) => [index('generated_documents_dealership_id_idx').on(t.dealershipId)]);
 
+// Append-only, tamper-evident audit trail (PRD #34 / #51). An immutable who/what/when
+// record of auth events and every state-changing mutation. Immutability + the SHA-256
+// hash chain (prev_hash -> row_hash) are enforced by the DB (see 0004 migration), not
+// here: the app connects as service_role (BYPASSRLS), so append-only is guaranteed by
+// triggers that raise on UPDATE/DELETE/TRUNCATE, and the hash columns are filled by a
+// BEFORE INSERT trigger — writers only ever supply the semantic columns below.
+export const auditLog = pgTable('audit_log', {
+  id: bigint('id', { mode: 'number' }).primaryKey().generatedAlwaysAsIdentity(),
+  actorUserId: uuid('actor_user_id').references(() => users.id),
+  actorEmail: varchar('actor_email', { length: 320 }).notNull().default(''),
+  action: varchar('action', { length: 96 }).notNull(),
+  entityType: varchar('entity_type', { length: 64 }).notNull().default(''),
+  entityId: text('entity_id').notNull().default(''),
+  dealershipId: integer('dealership_id').references(() => dealerships.id),
+  metadata: jsonb('metadata').notNull().default({}),
+  prevHash: text('prev_hash').notNull().default(''),
+  rowHash: text('row_hash').notNull().default(''),
+  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+}, (t) => [
+  index('audit_log_dealership_id_idx').on(t.dealershipId),
+  index('audit_log_actor_user_id_idx').on(t.actorUserId),
+  index('audit_log_action_idx').on(t.action),
+  index('audit_log_created_at_idx').on(t.createdAt),
+]);
+
 export type User = typeof users.$inferSelect;
 export type InsertUser = typeof users.$inferInsert;
 export type Dealership = typeof dealerships.$inferSelect;
@@ -76,3 +101,5 @@ export type Subscription = typeof subscriptions.$inferSelect;
 export type InsertSubscription = typeof subscriptions.$inferInsert;
 export type GeneratedDocument = typeof generatedDocuments.$inferSelect;
 export type InsertGeneratedDocument = typeof generatedDocuments.$inferInsert;
+export type AuditLogEntry = typeof auditLog.$inferSelect;
+export type InsertAuditLogEntry = typeof auditLog.$inferInsert;

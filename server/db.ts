@@ -2,14 +2,15 @@ import { drizzle } from 'drizzle-orm/postgres-js';
 import postgres from 'postgres';
 import { eq, and, sql } from 'drizzle-orm';
 import {
-  users, dealerships, complianceAnswers, subscriptions, generatedDocuments,
+  users, dealerships, complianceAnswers, subscriptions, generatedDocuments, auditLog,
   type User, type Dealership, type ComplianceAnswer, type Subscription, type GeneratedDocument,
   type InsertDealership, type InsertComplianceAnswer, type InsertSubscription, type InsertGeneratedDocument,
 } from '../drizzle/schema';
 import type { TenantScope } from '@shared/tenant-guard';
 import { AUTHENTICATED_ROLE, JWT_CLAIMS_SETTING, buildJwtClaims, isRlsEnforced } from '@shared/rls';
+import { writeAuditSafely, type AuditEventInput } from '@shared/audit';
 
-const SCHEMA = { users, dealerships, complianceAnswers, subscriptions, generatedDocuments };
+const SCHEMA = { users, dealerships, complianceAnswers, subscriptions, generatedDocuments, auditLog };
 
 function dbUrl() {
   return process.env.SUPABASE_DB_URL ?? process.env.DATABASE_URL ?? '';
@@ -181,6 +182,16 @@ export function getGeneratedDocuments(scope: TenantScope, docType?: string) {
       : eq(generatedDocuments.dealershipId, scope.dealershipId);
     return tx.select().from(generatedDocuments).where(where);
   });
+}
+
+// Audit trail — append-only, tamper-evident (PRD #34 / #51). Written as service_role;
+// immutability + the SHA-256 hash chain are DB-enforced (0004 migration). Fail-open via
+// writeAuditSafely: an audit-write failure is logged but never breaks the audited
+// operation (see @shared/audit for the rationale + the fail-closed follow-up note).
+export function appendAuditLog(event: AuditEventInput): Promise<void> {
+  return writeAuditSafely(async (record) => {
+    await getDb().insert(auditLog).values(record);
+  }, event);
 }
 
 export type { User, Dealership, ComplianceAnswer, Subscription, GeneratedDocument };

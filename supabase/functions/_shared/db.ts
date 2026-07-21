@@ -3,13 +3,14 @@ import postgres from 'npm:postgres';
 import { eq, and, sql } from 'npm:drizzle-orm';
 import { ENV } from './env.ts';
 import {
-  users, dealerships, complianceAnswers, subscriptions, generatedDocuments,
+  users, dealerships, complianceAnswers, subscriptions, generatedDocuments, auditLog,
   type User, type Dealership, type ComplianceAnswer, type Subscription, type GeneratedDocument,
 } from '../../../drizzle/schema.ts';
 import type { TenantScope } from '../../../shared/tenant-guard.ts';
 import { AUTHENTICATED_ROLE, JWT_CLAIMS_SETTING, buildJwtClaims, isRlsEnforced } from '../../../shared/rls.ts';
+import { writeAuditSafely, type AuditEventInput } from '../../../shared/audit.ts';
 
-const SCHEMA = { users, dealerships, complianceAnswers, subscriptions, generatedDocuments };
+const SCHEMA = { users, dealerships, complianceAnswers, subscriptions, generatedDocuments, auditLog };
 
 function getDb() {
   const client = postgres(ENV.supabaseDbUrl, { prepare: false });
@@ -169,6 +170,14 @@ export function getGeneratedDocuments(scope: TenantScope) {
   return scoped(scope.userId, async (tx) =>
     tx.select().from(generatedDocuments).where(eq(generatedDocuments.dealershipId, scope.dealershipId)),
   );
+}
+
+// Audit trail — append-only, tamper-evident (PRD #34 / #51). Mirrors server/db.ts:
+// written as service_role, immutability + hash chain DB-enforced (0004), fail-open.
+export function appendAuditLog(event: AuditEventInput): Promise<void> {
+  return writeAuditSafely(async (record) => {
+    await getDb().insert(auditLog).values(record);
+  }, event);
 }
 
 export type { User, Dealership, ComplianceAnswer, Subscription, GeneratedDocument };

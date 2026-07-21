@@ -5,6 +5,7 @@ import * as db from '../_shared/db.ts';
 import { ENV } from '../_shared/env.ts';
 import { appRouter } from '../_shared/routers.ts';
 import { decodeAalFromJwt, hasVerifiedFactor } from '../../../shared/mfa.ts';
+import { AUDIT_ACTIONS, isNewLoginSession } from '../../../shared/audit.ts';
 
 Deno.serve(async (req: Request) => {
   const corsResponse = handleCors(req);
@@ -38,6 +39,28 @@ Deno.serve(async (req: Request) => {
         });
         aal = decodeAalFromJwt(token);
         verifiedFactor = hasVerifiedFactor(authUser.factors);
+
+        // Mirror server/_core/context.ts: advance last-signed-in (previously only the
+        // Node runtime did this) and audit auth events on a genuine new session.
+        const prevLastSignedIn = user.lastSignedIn;
+        await db.updateUserLastSignedIn(user.id);
+        if (isNewLoginSession(prevLastSignedIn, new Date())) {
+          await db.appendAuditLog({
+            action: AUDIT_ACTIONS.authLogin,
+            actor: { userId: user.id, email: user.email },
+            entityType: 'user',
+            entityId: user.id,
+            metadata: { aal },
+          });
+          if (aal === 'aal2' && verifiedFactor) {
+            await db.appendAuditLog({
+              action: AUDIT_ACTIONS.authMfaStepUp,
+              actor: { userId: user.id, email: user.email },
+              entityType: 'user',
+              entityId: user.id,
+            });
+          }
+        }
       }
 
       return { user, aal, hasVerifiedFactor: verifiedFactor };

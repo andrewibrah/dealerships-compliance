@@ -32,11 +32,16 @@ export function useAuth() {
     enabled: !!session,
   });
 
+  const logoutMutation = trpc.auth.logout.useMutation();
+
   const logout = useCallback(async () => {
+    // Record the logout server-side (audit trail, PRD #34) while the session token is
+    // still valid, then tear down the session. Best-effort: never block sign-out on it.
+    await logoutMutation.mutateAsync().catch(() => {});
     await supabase.auth.signOut();
     setSession(null);
     setLocation('/');
-  }, [setLocation]);
+  }, [logoutMutation, setLocation]);
 
   return {
     user: (user as AuthUser | null | undefined) ?? null,

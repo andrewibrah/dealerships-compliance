@@ -7,10 +7,19 @@ import { pdfRouter } from './pdf-router.ts';
 import { ENV } from './env.ts';
 import { router, publicProcedure, protectedProcedure } from './trpc.ts';
 import { resolveTenantScope } from '../../../shared/tenant-guard.ts';
+import { AUDIT_ACTIONS } from '../../../shared/audit.ts';
 
 const authRouter = router({
   me: publicProcedure.query(({ ctx }) => ctx.user),
-  logout: publicProcedure.mutation(() => ({ success: true })),
+  logout: publicProcedure.mutation(async ({ ctx }) => {
+    await db.appendAuditLog({
+      action: AUDIT_ACTIONS.authLogout,
+      actor: { userId: ctx.user?.id ?? null, email: ctx.user?.email ?? null },
+      entityType: 'user',
+      entityId: ctx.user?.id ?? null,
+    });
+    return { success: true };
+  }),
 });
 
 const dealershipRouter = router({
@@ -29,7 +38,7 @@ const dealershipRouter = router({
       qiEmail: z.string().email().or(z.literal('')).optional(),
     }))
     .mutation(async ({ ctx, input }) => {
-      return db.createDealership({
+      const dealership = await db.createDealership({
         userId: ctx.user.id,
         name: input.name,
         address: input.address ?? '',
@@ -40,6 +49,15 @@ const dealershipRouter = router({
         qualifiedIndividual: input.qualifiedIndividual ?? '',
         qiEmail: input.qiEmail ?? '',
       });
+      await db.appendAuditLog({
+        action: AUDIT_ACTIONS.dealershipCreate,
+        actor: { userId: ctx.user.id, email: ctx.user.email },
+        entityType: 'dealership',
+        entityId: dealership.id,
+        dealershipId: dealership.id,
+        metadata: { name: dealership.name },
+      });
+      return dealership;
     }),
   update: protectedProcedure
     .input(z.object({
@@ -57,7 +75,16 @@ const dealershipRouter = router({
       const existing = await db.getDealershipByUserId(ctx.user.id);
       if (!existing || existing.id !== input.id) throw new TRPCError({ code: 'FORBIDDEN' });
       const { id, ...data } = input;
-      return db.updateDealership(id, data);
+      const updated = await db.updateDealership(id, data);
+      await db.appendAuditLog({
+        action: AUDIT_ACTIONS.dealershipUpdate,
+        actor: { userId: ctx.user.id, email: ctx.user.email },
+        entityType: 'dealership',
+        entityId: id,
+        dealershipId: id,
+        metadata: { fields: Object.keys(data) },
+      });
+      return updated;
     }),
 });
 
@@ -91,7 +118,7 @@ const complianceRouter = router({
     .mutation(async ({ ctx, input }) => {
       const scope = await resolveTenantScope(db, ctx.user.id, { createIfMissing: true });
       if (!scope) throw new Error('Unable to resolve dealership');
-      return db.saveComplianceAnswer(scope, {
+      const row = await db.saveComplianceAnswer(scope, {
         section: input.section,
         sectionName: input.sectionName,
         answers: input.answers,
@@ -100,6 +127,15 @@ const complianceRouter = router({
         completedAt: input.completed ? new Date() : undefined,
         updatedAt: new Date(),
       });
+      await db.appendAuditLog({
+        action: AUDIT_ACTIONS.complianceSaveSection,
+        actor: { userId: ctx.user.id, email: ctx.user.email },
+        entityType: 'compliance_answer',
+        entityId: input.section,
+        dealershipId: scope.dealershipId,
+        metadata: { section: input.section, sectionName: input.sectionName },
+      });
+      return row;
     }),
   saveSection: protectedProcedure
     .input(z.object({
@@ -113,7 +149,7 @@ const complianceRouter = router({
       const scope = await resolveTenantScope(db, ctx.user.id, { createIfMissing: true });
       if (!scope) throw new Error('Unable to resolve dealership');
       const completed = input.completed !== undefined ? Boolean(input.completed) : undefined;
-      return db.saveComplianceAnswer(scope, {
+      const row = await db.saveComplianceAnswer(scope, {
         section: input.section,
         sectionName: input.sectionName,
         answers: input.answers,
@@ -122,6 +158,15 @@ const complianceRouter = router({
         completedAt: completed ? new Date() : undefined,
         updatedAt: new Date(),
       });
+      await db.appendAuditLog({
+        action: AUDIT_ACTIONS.complianceSaveSection,
+        actor: { userId: ctx.user.id, email: ctx.user.email },
+        entityType: 'compliance_answer',
+        entityId: input.section,
+        dealershipId: scope.dealershipId,
+        metadata: { section: input.section, sectionName: input.sectionName, completed },
+      });
+      return row;
     }),
 });
 
@@ -141,7 +186,16 @@ const subscriptionRouter = router({
     .mutation(async ({ ctx, input }) => {
       const dealership = await db.getDealershipByUserId(ctx.user.id);
       if (!dealership) throw new TRPCError({ code: 'NOT_FOUND' });
-      return db.createSubscription({ dealershipId: dealership.id, ...input, status: 'active' });
+      const subscription = await db.createSubscription({ dealershipId: dealership.id, ...input, status: 'active' });
+      await db.appendAuditLog({
+        action: AUDIT_ACTIONS.subscriptionCreate,
+        actor: { userId: ctx.user.id, email: ctx.user.email },
+        entityType: 'subscription',
+        entityId: subscription.id,
+        dealershipId: dealership.id,
+        metadata: { plan: input.plan },
+      });
+      return subscription;
     }),
   updateStatus: protectedProcedure
     .input(z.object({ stripeSubscriptionId: z.string(), status: z.enum(['active', 'inactive', 'canceled']) }))
@@ -151,6 +205,14 @@ const subscriptionRouter = router({
       const subscription = await db.getSubscription(dealership.id);
       if (!subscription) throw new TRPCError({ code: 'NOT_FOUND' });
       await db.updateSubscription(subscription.id, { status: input.status });
+      await db.appendAuditLog({
+        action: AUDIT_ACTIONS.subscriptionUpdateStatus,
+        actor: { userId: ctx.user.id, email: ctx.user.email },
+        entityType: 'subscription',
+        entityId: subscription.id,
+        dealershipId: dealership.id,
+        metadata: { status: input.status, stripeSubscriptionId: input.stripeSubscriptionId },
+      });
       return { success: true };
     }),
 });
@@ -182,7 +244,16 @@ const documentsRouter = router({
     .mutation(async ({ ctx, input }) => {
       const scope = await resolveTenantScope(db, ctx.user.id);
       if (!scope) throw new TRPCError({ code: 'NOT_FOUND' });
-      return db.saveGeneratedDocument(scope, { docType: input.docType, storagePath: input.storagePath });
+      const doc = await db.saveGeneratedDocument(scope, { docType: input.docType, storagePath: input.storagePath });
+      await db.appendAuditLog({
+        action: AUDIT_ACTIONS.documentGenerate,
+        actor: { userId: ctx.user.id, email: ctx.user.email },
+        entityType: 'generated_document',
+        entityId: doc.id,
+        dealershipId: scope.dealershipId,
+        metadata: { docType: input.docType },
+      });
+      return doc;
     }),
 });
 

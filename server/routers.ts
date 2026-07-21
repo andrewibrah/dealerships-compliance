@@ -3,6 +3,7 @@ import { publicProcedure, router, protectedProcedure } from './_core/trpc';
 import { z } from 'zod';
 import * as db from './db';
 import { resolveTenantScope } from '@shared/tenant-guard';
+import { AUDIT_ACTIONS } from '@shared/audit';
 import { storageGetSignedUrl } from './storage';
 import { pdfRouter } from './pdf-router';
 import { stripeRouter } from './stripe-router';
@@ -19,7 +20,13 @@ export const appRouter = router({
 
   auth: router({
     me: publicProcedure.query((opts) => opts.ctx.user),
-    logout: publicProcedure.mutation(() => {
+    logout: publicProcedure.mutation(async ({ ctx }) => {
+      await db.appendAuditLog({
+        action: AUDIT_ACTIONS.authLogout,
+        actor: { userId: ctx.user?.id ?? null, email: ctx.user?.email ?? null },
+        entityType: 'user',
+        entityId: ctx.user?.id ?? null,
+      });
       // Session is managed by Supabase client on the frontend
       return { success: true } as const;
     }),
@@ -45,7 +52,7 @@ export const appRouter = router({
         })
       )
       .mutation(async ({ ctx, input }) => {
-        return db.createDealership({
+        const dealership = await db.createDealership({
           userId: ctx.user.id,
           name: input.name,
           address: input.address ?? '',
@@ -56,6 +63,15 @@ export const appRouter = router({
           qualifiedIndividual: input.qualifiedIndividual ?? '',
           qiEmail: input.qiEmail ?? '',
         });
+        await db.appendAuditLog({
+          action: AUDIT_ACTIONS.dealershipCreate,
+          actor: { userId: ctx.user.id, email: ctx.user.email },
+          entityType: 'dealership',
+          entityId: dealership.id,
+          dealershipId: dealership.id,
+          metadata: { name: dealership.name },
+        });
+        return dealership;
       }),
 
     update: protectedProcedure
@@ -79,6 +95,14 @@ export const appRouter = router({
         }
         const { id, ...updateData } = input;
         await db.updateDealership(id, updateData);
+        await db.appendAuditLog({
+          action: AUDIT_ACTIONS.dealershipUpdate,
+          actor: { userId: ctx.user.id, email: ctx.user.email },
+          entityType: 'dealership',
+          entityId: id,
+          dealershipId: id,
+          metadata: { fields: Object.keys(updateData) },
+        });
         return { success: true };
       }),
   }),
@@ -122,6 +146,14 @@ export const appRouter = router({
           sectionName: input.sectionName,
           answers: input.answers,
         });
+        await db.appendAuditLog({
+          action: AUDIT_ACTIONS.complianceSaveSection,
+          actor: { userId: ctx.user.id, email: ctx.user.email },
+          entityType: 'compliance_answer',
+          entityId: input.section,
+          dealershipId: scope.dealershipId,
+          metadata: { section: input.section, sectionName: input.sectionName },
+        });
         return { success: true };
       }),
 
@@ -146,6 +178,18 @@ export const appRouter = router({
           completed: input.completed !== undefined ? Boolean(input.completed) : undefined,
           completedAt: input.completed ? new Date() : null,
         });
+        await db.appendAuditLog({
+          action: AUDIT_ACTIONS.complianceSaveSection,
+          actor: { userId: ctx.user.id, email: ctx.user.email },
+          entityType: 'compliance_answer',
+          entityId: input.section,
+          dealershipId: scope.dealershipId,
+          metadata: {
+            section: input.section,
+            sectionName: input.sectionName,
+            completed: input.completed !== undefined ? Boolean(input.completed) : undefined,
+          },
+        });
         return { success: true };
       }),
   }),
@@ -169,11 +213,20 @@ export const appRouter = router({
       .mutation(async ({ ctx, input }) => {
         const dealership = await db.getDealershipByUserId(ctx.user.id);
         if (!dealership) throw new Error('No dealership found');
-        return db.createSubscription({
+        const subscription = await db.createSubscription({
           dealershipId: dealership.id,
           ...input,
           status: 'active',
         });
+        await db.appendAuditLog({
+          action: AUDIT_ACTIONS.subscriptionCreate,
+          actor: { userId: ctx.user.id, email: ctx.user.email },
+          entityType: 'subscription',
+          entityId: subscription.id,
+          dealershipId: dealership.id,
+          metadata: { plan: input.plan },
+        });
+        return subscription;
       }),
 
     updateStatus: protectedProcedure
@@ -189,6 +242,14 @@ export const appRouter = router({
         const subscription = await db.getSubscription(dealership.id);
         if (!subscription) throw new Error('No subscription found');
         await db.updateSubscription(subscription.id, { status: input.status });
+        await db.appendAuditLog({
+          action: AUDIT_ACTIONS.subscriptionUpdateStatus,
+          actor: { userId: ctx.user.id, email: ctx.user.email },
+          entityType: 'subscription',
+          entityId: subscription.id,
+          dealershipId: dealership.id,
+          metadata: { status: input.status, stripeSubscriptionId: input.stripeSubscriptionId },
+        });
         return { success: true };
       }),
   }),
@@ -233,10 +294,19 @@ export const appRouter = router({
       .mutation(async ({ ctx, input }) => {
         const scope = await resolveTenantScope(db, ctx.user.id);
         if (!scope) throw new Error('No dealership found');
-        return db.saveGeneratedDocument(scope, {
+        const doc = await db.saveGeneratedDocument(scope, {
           docType: input.docType,
           storagePath: input.storagePath,
         });
+        await db.appendAuditLog({
+          action: AUDIT_ACTIONS.documentGenerate,
+          actor: { userId: ctx.user.id, email: ctx.user.email },
+          entityType: 'generated_document',
+          entityId: doc.id,
+          dealershipId: scope.dealershipId,
+          metadata: { docType: input.docType },
+        });
+        return doc;
       }),
   }),
 });

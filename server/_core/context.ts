@@ -4,6 +4,7 @@ import * as db from '../db';
 import { ENV } from './env';
 import type { User } from '../../drizzle/schema';
 import { decodeAalFromJwt, hasVerifiedFactor, type AuthAssuranceLevel } from '@shared/mfa';
+import { AUDIT_ACTIONS, isNewLoginSession } from '@shared/audit';
 
 export type TrpcContext = {
   req: Request;
@@ -47,12 +48,35 @@ async function getAuthFromRequest(req: Request): Promise<AuthResult> {
       role,
     });
 
+    // Prior sign-in timestamp (createUser's upsert does not touch it) drives new-session
+    // detection; capture it before we advance it.
+    const prevLastSignedIn = user.lastSignedIn;
     await db.updateUserLastSignedIn(user.id);
-    return {
-      user,
-      aal: decodeAalFromJwt(token),
-      hasVerifiedFactor: hasVerifiedFactor(authUser.factors),
-    };
+
+    const aal = decodeAalFromJwt(token);
+    const verifiedFactor = hasVerifiedFactor(authUser.factors);
+
+    // Audit auth events on a genuine new session (de-duplicated so per-request context
+    // building doesn't spam the trail). Fail-open — appendAuditLog never throws.
+    if (isNewLoginSession(prevLastSignedIn, new Date())) {
+      await db.appendAuditLog({
+        action: AUDIT_ACTIONS.authLogin,
+        actor: { userId: user.id, email: user.email },
+        entityType: 'user',
+        entityId: user.id,
+        metadata: { aal },
+      });
+      if (aal === 'aal2' && verifiedFactor) {
+        await db.appendAuditLog({
+          action: AUDIT_ACTIONS.authMfaStepUp,
+          actor: { userId: user.id, email: user.email },
+          entityType: 'user',
+          entityId: user.id,
+        });
+      }
+    }
+
+    return { user, aal, hasVerifiedFactor: verifiedFactor };
   } catch {
     return ANON_AUTH;
   }
