@@ -119,7 +119,7 @@ Status legend: **Implemented** / **Partial** / **Missing** / **Divergent**. Seve
 
 | # | Requirement | Status | Evidence (path:line) | Gap | Sev | Recommended action |
 |---|---|---|---|---|---|---|
-| 46 ★ | Multi-tenant data layer with hard isolation (RLS or per-tenant schema) | Partial | RLS enabled with **zero policies** (`supabase/migrations/0001_init_schema.sql:70-75`; no `CREATE POLICY` anywhere); isolation is app-layer via `getDealershipByUserId` (`server/routers.ts:46`); Drizzle uses service role, bypassing RLS | Isolation is app-enforced only; no DB-level defense in depth | High | Add RLS policies (or a verified tenant-guard) as defense in depth |
+| 46 ★ | Multi-tenant data layer with hard isolation (RLS or per-tenant schema) | Partial (hardened 2026-07-21) | **App-layer tenant-guard shipped + tested**: single funnel `resolveTenantScope` + branded `ScopedDealershipId` with owner re-check (`shared/tenant-guard.ts`); crown-jewel accessors require a `TenantScope` in both runtimes (`server/db.ts`, `supabase/functions/_shared/db.ts`); A-cannot-read-B regression (`server/tenant-guard.test.ts`). **RLS staged, not yet enabled**: policies + `FORCE RLS` + `current_user_dealership_ids()` in `supabase/migrations/0003_tenant_isolation_rls.sql`; flag-gated authenticated-scoping in `scoped()` behind `RLS_ENFORCED` (default off) | DB-level enforcement is written but not applied/enabled; app-layer isolation is now tested defense-in-depth | High | Apply `0003` + validate on staging + flip `RLS_ENFORCED`, then extend scoping to dealership/subscription paths — see `.claude/tasks/NextWork.md`. Detail: `.claude/tasks/done/0002-tenant-isolation.md` |
 | 47 ★ | Auth done right: SSO, enforced MFA, RBAC | Partial | **MFA enforced** (enrolled-only): decision `shared/mfa.ts` (`requiresMfaStepUp`); Node gate `server/_core/trpc.ts:13-30`; Deno gate `supabase/functions/_shared/trpc.ts:10-16`; enroll `client/src/components/MfaEnrollment.tsx`; login step-up `client/src/pages/Login.tsx`. Roles still `user`/`admin` only (`schema.ts:6`) | MFA ✓ (TOTP/AAL2). Remaining: no SSO; no compliance-role RBAC (owner/QI/staff/auditor). Policy is *enrolled-only* (a user who never enrolls isn't gated) | High | SSO + RBAC (#42) next; consider enforce-all MFA if the pilot requires it |
 | 48 | LLM orchestration (routing, prompt/version mgmt, tool-calling) | Missing | `server/_core/llm.ts:143` is a single gpt-4o-mini chat wrapper, never called | No orchestration; unused wrapper | Low | Build when the LLM path is actually needed (#11/#30) |
 | 49 | Deterministic rule-engine service, separate from LLM | Implemented | `shared/scoring.ts` pure module, isolated from `llm.ts` | Cleanly separated (not a standalone service, but decoupled) | — | Keep the separation as LLM features land |
@@ -172,8 +172,11 @@ Sequenced by **severity first, dependency second** (compliance ground rule: auth
 1. ~~**Enforce MFA (TOTP / AAL2)** on auth + protected procedures — PRD #47 — **Critical** — **M**~~
    ✅ **Done (2026-07-21)** — enrolled-only TOTP enforcement in both runtimes; enrollment + login
    step-up UI. See `.claude/tasks/done/0001-mfa-enforcement.md`. Remaining #47 sub-gaps: SSO, RBAC.
-2. **Tenant isolation, defense-in-depth: RLS policies** (or a verified, tested tenant-guard) — PRD #46 — **High** — **M**
-   *Today isolation is app-layer only; add DB-level enforcement so a coding mistake can't cross tenants.*
+2. **Tenant isolation, defense-in-depth** — PRD #46 — **High** — **M** — 🟡 **In progress (2026-07-21)**
+   App-layer **tenant-guard shipped + tested** (`resolveTenantScope` funnel + branded scope + A≠B
+   regression). DB-layer **RLS staged** (`0003_tenant_isolation_rls.sql` + flag-gated `scoped()`) but
+   **not yet applied/enabled** — enable runbook in `.claude/tasks/NextWork.md`. See
+   `.claude/tasks/done/0002-tenant-isolation.md`.
 3. **Append-only audit trail** (immutable, who/what/when; separate store) — PRD #34/#51 — **Critical** — **L**
    *The examiner/litigation record. Start logging auth + all state-changing mutations now.*
 4. **Core compliance object model** (Control, Requirement, Risk, Evidence, Task, Policy, Asset, DataFlow, Attestation) — PRD #3 — **High** — **L**

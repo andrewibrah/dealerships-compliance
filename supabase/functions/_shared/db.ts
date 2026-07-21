@@ -1,15 +1,44 @@
 import { drizzle } from 'npm:drizzle-orm/postgres-js';
 import postgres from 'npm:postgres';
-import { eq, and } from 'npm:drizzle-orm';
+import { eq, and, sql } from 'npm:drizzle-orm';
 import { ENV } from './env.ts';
 import {
   users, dealerships, complianceAnswers, subscriptions, generatedDocuments,
   type User, type Dealership, type ComplianceAnswer, type Subscription, type GeneratedDocument,
 } from '../../../drizzle/schema.ts';
+import type { TenantScope } from '../../../shared/tenant-guard.ts';
+import { AUTHENTICATED_ROLE, JWT_CLAIMS_SETTING, buildJwtClaims, isRlsEnforced } from '../../../shared/rls.ts';
+
+const SCHEMA = { users, dealerships, complianceAnswers, subscriptions, generatedDocuments };
 
 function getDb() {
   const client = postgres(ENV.supabaseDbUrl, { prepare: false });
-  return drizzle(client, { schema: { users, dealerships, complianceAnswers, subscriptions, generatedDocuments } });
+  return drizzle(client, { schema: SCHEMA });
+}
+
+function rlsEnforced() {
+  return isRlsEnforced(Deno.env.get('RLS_ENFORCED'));
+}
+
+type ScopedTx = Parameters<Parameters<ReturnType<typeof getDb>['transaction']>[0]>[0];
+
+// Mirror of server/db.ts `scoped`: tenant-scoped unit of work. When RLS_ENFORCED=true
+// and a userId is present, impersonate the `authenticated` role + inject JWT claims so
+// Postgres RLS (0003 migration) applies; otherwise a plain service-role transaction.
+async function scoped<T>(userId: string | null, fn: (tx: ScopedTx) => Promise<T>): Promise<T> {
+  const client = postgres(ENV.supabaseDbUrl, { prepare: false });
+  try {
+    const database = drizzle(client, { schema: SCHEMA });
+    return await database.transaction(async (tx) => {
+      if (userId && rlsEnforced()) {
+        await tx.execute(sql`select set_config(${JWT_CLAIMS_SETTING}, ${buildJwtClaims(userId)}, true)`);
+        await tx.execute(sql.raw(`set local role ${AUTHENTICATED_ROLE}`));
+      }
+      return fn(tx);
+    });
+  } finally {
+    await client.end({ timeout: 5 });
+  }
 }
 
 // Users
@@ -57,33 +86,50 @@ export async function createDealership(data: Omit<typeof dealerships.$inferInser
   return d;
 }
 
+// Single source of the auto-provisioned default dealership (mirrors server/db.ts).
+export async function createDefaultDealership(userId: string) {
+  return createDealership({
+    userId,
+    name: 'My Dealership',
+    address: '',
+    city: '',
+    state: '',
+    dmsVendor: '',
+    rooftopCount: 1,
+    qualifiedIndividual: '',
+    qiEmail: '',
+  });
+}
+
 export async function updateDealership(id: number, data: Partial<Omit<typeof dealerships.$inferInsert, 'id'>>) {
   const db = getDb();
   const [d] = await db.update(dealerships).set({ ...data, updatedAt: new Date() }).where(eq(dealerships.id, id)).returning();
   return d;
 }
 
-// Compliance
-export async function saveComplianceAnswer(data: Omit<typeof complianceAnswers.$inferInsert, 'id'>) {
-  const db = getDb();
-  const [row] = await db
-    .insert(complianceAnswers)
-    .values(data)
-    .onConflictDoUpdate({
-      target: [complianceAnswers.dealershipId, complianceAnswers.section],
-      set: { answers: data.answers, score: data.score, completed: data.completed, completedAt: data.completedAt, updatedAt: new Date() },
-    })
-    .returning();
-  return row;
+// Compliance — crown-jewel tenant data: TenantScope-only (mirrors server/db.ts).
+export function saveComplianceAnswer(scope: TenantScope, data: Omit<typeof complianceAnswers.$inferInsert, 'id' | 'dealershipId'>) {
+  return scoped(scope.userId, async (tx) => {
+    const [row] = await tx
+      .insert(complianceAnswers)
+      .values({ ...data, dealershipId: scope.dealershipId })
+      .onConflictDoUpdate({
+        target: [complianceAnswers.dealershipId, complianceAnswers.section],
+        set: { sectionName: data.sectionName, answers: data.answers, score: data.score, completed: data.completed, completedAt: data.completedAt, updatedAt: new Date() },
+      })
+      .returning();
+    return row;
+  });
 }
 
-export async function getComplianceAnswers(dealershipId: number) {
-  const db = getDb();
-  return db.select().from(complianceAnswers).where(eq(complianceAnswers.dealershipId, dealershipId));
+export function getComplianceAnswers(scope: TenantScope) {
+  return scoped(scope.userId, async (tx) =>
+    tx.select().from(complianceAnswers).where(eq(complianceAnswers.dealershipId, scope.dealershipId)),
+  );
 }
 
-export async function getAllComplianceAnswers(dealershipId: number) {
-  return getComplianceAnswers(dealershipId);
+export function getAllComplianceAnswers(scope: TenantScope) {
+  return getComplianceAnswers(scope);
 }
 
 // Subscriptions
@@ -111,16 +157,18 @@ export async function updateSubscription(id: number, data: Partial<Omit<typeof s
   return sub;
 }
 
-// Documents
-export async function saveGeneratedDocument(data: Omit<typeof generatedDocuments.$inferInsert, 'id' | 'generatedAt'>) {
-  const db = getDb();
-  const [doc] = await db.insert(generatedDocuments).values(data).returning();
-  return doc;
+// Documents — crown-jewel tenant data: TenantScope-only (mirrors server/db.ts).
+export function saveGeneratedDocument(scope: TenantScope, data: Omit<typeof generatedDocuments.$inferInsert, 'id' | 'generatedAt' | 'dealershipId'>) {
+  return scoped(scope.userId, async (tx) => {
+    const [doc] = await tx.insert(generatedDocuments).values({ ...data, dealershipId: scope.dealershipId }).returning();
+    return doc;
+  });
 }
 
-export async function getGeneratedDocuments(dealershipId: number) {
-  const db = getDb();
-  return db.select().from(generatedDocuments).where(eq(generatedDocuments.dealershipId, dealershipId));
+export function getGeneratedDocuments(scope: TenantScope) {
+  return scoped(scope.userId, async (tx) =>
+    tx.select().from(generatedDocuments).where(eq(generatedDocuments.dealershipId, scope.dealershipId)),
+  );
 }
 
 export type { User, Dealership, ComplianceAnswer, Subscription, GeneratedDocument };

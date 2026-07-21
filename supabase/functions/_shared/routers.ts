@@ -6,23 +6,7 @@ import { stripeRouter } from './stripe-router.ts';
 import { pdfRouter } from './pdf-router.ts';
 import { ENV } from './env.ts';
 import { router, publicProcedure, protectedProcedure } from './trpc.ts';
-
-async function getOrCreateDefaultDealership(userId: string) {
-  const existing = await db.getDealershipByUserId(userId);
-  if (existing) return existing;
-
-  return db.createDealership({
-    userId,
-    name: 'My Dealership',
-    address: '',
-    city: '',
-    state: '',
-    dmsVendor: '',
-    rooftopCount: 1,
-    qualifiedIndividual: '',
-    qiEmail: '',
-  });
-}
+import { resolveTenantScope } from '../../../shared/tenant-guard.ts';
 
 const authRouter = router({
   me: publicProcedure.query(({ ctx }) => ctx.user),
@@ -79,21 +63,21 @@ const dealershipRouter = router({
 
 const complianceRouter = router({
   getAnswers: protectedProcedure.query(async ({ ctx }) => {
-    const dealership = await db.getDealershipByUserId(ctx.user.id);
-    if (!dealership) return [];
-    return db.getComplianceAnswers(dealership.id);
+    const scope = await resolveTenantScope(db, ctx.user.id);
+    if (!scope) return [];
+    return db.getAllComplianceAnswers(scope);
   }),
   getAll: protectedProcedure.query(async ({ ctx }) => {
-    const dealership = await db.getDealershipByUserId(ctx.user.id);
-    if (!dealership) return [];
-    return db.getAllComplianceAnswers(dealership.id);
+    const scope = await resolveTenantScope(db, ctx.user.id);
+    if (!scope) return [];
+    return db.getAllComplianceAnswers(scope);
   }),
   getSection: protectedProcedure
     .input(z.object({ section: z.number().int().min(1).max(9) }))
     .query(async ({ ctx, input }) => {
-      const dealership = await db.getDealershipByUserId(ctx.user.id);
-      if (!dealership) return null;
-      const answers = await db.getComplianceAnswers(dealership.id);
+      const scope = await resolveTenantScope(db, ctx.user.id);
+      if (!scope) return null;
+      const answers = await db.getAllComplianceAnswers(scope);
       return answers.find((a) => a.section === input.section) ?? null;
     }),
   saveAnswer: protectedProcedure
@@ -105,9 +89,9 @@ const complianceRouter = router({
       completed: z.boolean().optional(),
     }))
     .mutation(async ({ ctx, input }) => {
-      const dealership = await getOrCreateDefaultDealership(ctx.user.id);
-      return db.saveComplianceAnswer({
-        dealershipId: dealership.id,
+      const scope = await resolveTenantScope(db, ctx.user.id, { createIfMissing: true });
+      if (!scope) throw new Error('Unable to resolve dealership');
+      return db.saveComplianceAnswer(scope, {
         section: input.section,
         sectionName: input.sectionName,
         answers: input.answers,
@@ -126,10 +110,10 @@ const complianceRouter = router({
       completed: z.union([z.boolean(), z.number()]).optional(),
     }))
     .mutation(async ({ ctx, input }) => {
-      const dealership = await getOrCreateDefaultDealership(ctx.user.id);
+      const scope = await resolveTenantScope(db, ctx.user.id, { createIfMissing: true });
+      if (!scope) throw new Error('Unable to resolve dealership');
       const completed = input.completed !== undefined ? Boolean(input.completed) : undefined;
-      return db.saveComplianceAnswer({
-        dealershipId: dealership.id,
+      return db.saveComplianceAnswer(scope, {
         section: input.section,
         sectionName: input.sectionName,
         answers: input.answers,
@@ -173,9 +157,9 @@ const subscriptionRouter = router({
 
 const documentsRouter = router({
   getAll: protectedProcedure.query(async ({ ctx }) => {
-    const dealership = await db.getDealershipByUserId(ctx.user.id);
-    if (!dealership) return [];
-    const docs = await db.getGeneratedDocuments(dealership.id);
+    const scope = await resolveTenantScope(db, ctx.user.id);
+    if (!scope) return [];
+    const docs = await db.getGeneratedDocuments(scope);
     return Promise.all(
       docs.map(async (doc) => ({
         ...doc,
@@ -188,17 +172,17 @@ const documentsRouter = router({
   getByType: protectedProcedure
     .input(z.object({ docType: z.string() }))
     .query(async ({ ctx, input }) => {
-      const dealership = await db.getDealershipByUserId(ctx.user.id);
-      if (!dealership) return [];
-      const docs = await db.getGeneratedDocuments(dealership.id);
+      const scope = await resolveTenantScope(db, ctx.user.id);
+      if (!scope) return [];
+      const docs = await db.getGeneratedDocuments(scope);
       return docs.filter((d) => d.docType === input.docType);
     }),
   save: protectedProcedure
     .input(z.object({ docType: z.string(), storagePath: z.string().optional() }))
     .mutation(async ({ ctx, input }) => {
-      const dealership = await db.getDealershipByUserId(ctx.user.id);
-      if (!dealership) throw new TRPCError({ code: 'NOT_FOUND' });
-      return db.saveGeneratedDocument({ dealershipId: dealership.id, docType: input.docType, storagePath: input.storagePath });
+      const scope = await resolveTenantScope(db, ctx.user.id);
+      if (!scope) throw new TRPCError({ code: 'NOT_FOUND' });
+      return db.saveGeneratedDocument(scope, { docType: input.docType, storagePath: input.storagePath });
     }),
 });
 

@@ -1,6 +1,6 @@
 import {
   pgTable, pgEnum, uuid, varchar, text, integer, boolean,
-  timestamp, jsonb, unique,
+  timestamp, jsonb, unique, index,
 } from 'drizzle-orm/pg-core';
 
 export const roleEnum = pgEnum('role', ['user', 'admin']);
@@ -28,7 +28,7 @@ export const dealerships = pgTable('dealerships', {
   qiEmail: varchar('qi_email', { length: 320 }).notNull().default(''),
   createdAt: timestamp('created_at').notNull().defaultNow(),
   updatedAt: timestamp('updated_at').notNull().defaultNow(),
-});
+}, (t) => [index('dealerships_user_id_idx').on(t.userId)]);
 
 export const complianceAnswers = pgTable(
   'compliance_answers',
@@ -55,7 +55,7 @@ export const subscriptions = pgTable('subscriptions', {
   status: varchar('status', { length: 64 }).notNull().default('active'),
   currentPeriodEnd: timestamp('current_period_end'),
   createdAt: timestamp('created_at').notNull().defaultNow(),
-});
+}, (t) => [index('subscriptions_dealership_id_idx').on(t.dealershipId)]);
 
 export const generatedDocuments = pgTable('generated_documents', {
   id: integer('id').primaryKey().generatedAlwaysAsIdentity(),
@@ -64,7 +64,7 @@ export const generatedDocuments = pgTable('generated_documents', {
   version: integer('version').notNull().default(1),
   storagePath: text('storage_path'),
   generatedAt: timestamp('generated_at').notNull().defaultNow(),
-});
+}, (t) => [index('generated_documents_dealership_id_idx').on(t.dealershipId)]);
 
 export type User = typeof users.$inferSelect;
 export type InsertUser = typeof users.$inferInsert;

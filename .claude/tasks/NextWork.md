@@ -1,56 +1,65 @@
 # Next Work — handoff for the next session
 
 ## Task
-**Remediation #2 — Tenant isolation, defense-in-depth: add Supabase RLS policies (or a verified,
-tested tenant-guard) so business rows cannot cross tenants even if application-layer filtering has
-a bug.** PRD #46 — High.
+**Finish Remediation #2 — enable & validate the DB-layer RLS backstop that session 0002 staged.**
+The app-layer tenant-guard is already live and tested; the RLS policies + the flag-gated
+authenticated-scoping executor are written but **not applied and not enabled**. This session turns
+the DB-level "hard isolation" on, safely, with staging validation. PRD #46 — High.
 
-## Cold-start context
-- Today tenant isolation is **application-layer only.** RLS is *enabled* on every table but has
-  **zero policies** (`supabase/migrations/0001_init_schema.sql:70-75` — no `CREATE POLICY`
-  anywhere). Drizzle connects with the service role via `SUPABASE_DB_URL`, which **bypasses RLS
-  entirely**, and every tRPC query scopes data by calling `getDealershipByUserId` (e.g.
-  `server/routers.ts:46`, `104-113`). So the *only* thing preventing tenant A from reading tenant
-  B's rows is that each query remembers to filter by the caller's dealership. One missing filter =
-  a cross-tenant leak.
-- Two enforcement strategies — pick one and document the decision in a `done/` log:
-  1. **RLS policies** on `dealerships` / `compliance_answers` / `subscriptions` /
-     `generated_documents` keyed on the authenticated user → dealership. Requires the Edge Function
-     to run queries as the **authenticated** role (JWT-scoped), not the service role — a meaningful
-     change to the DB access path, since Drizzle currently uses the service-role connection. This
-     is the true "hard isolation" PRD #46 asks for.
-  2. **Verified tenant-guard**: keep the service-role path but funnel every business query through a
-     single helper that *requires* a `dealershipId` derived from `ctx.user`, plus tests that fail if
-     a query bypasses it. Cheaper, but defense-in-depth is weaker (still app-layer).
-- **If Step 1 (MFA) landed first**, the session JWT now carries `aal2` for MFA'd users — useful
-  context if you choose the JWT-scoped RLS route, but not a prerequisite.
-- Keep the two router copies and two `db.ts` copies in sync (see CLAUDE.md).
+## Cold-start context (what 0002 shipped)
+- **App-layer guard is LIVE.** Business reads/writes of the crown-jewel tables (`compliance_answers`,
+  `generated_documents`) funnel through `resolveTenantScope(db, ctx.user.id)` and require a branded
+  `TenantScope`. See `.claude/tasks/done/0002-tenant-isolation.md` for the full rationale + review.
+- **RLS is staged but dormant:**
+  - `supabase/migrations/0003_tenant_isolation_rls.sql` — policies on all 5 tables, the
+    `current_user_dealership_ids()` SECURITY DEFINER helper, `FORCE ROW LEVEL SECURITY`, FK indexes.
+    **Not yet applied** to the Supabase DB.
+  - `scoped()` in `server/db.ts` + `supabase/functions/_shared/db.ts` runs crown-jewel queries as the
+    `authenticated` role with injected `request.jwt.claims` **only when `RLS_ENFORCED=true`**. The
+    flag is **off** everywhere. `shared/rls.ts` builds the claim payload (unit-tested).
+- **Why it's gated:** RLS is enabled on every table (since 0001) with — until 0003 is applied — zero
+  policies. Flipping `RLS_ENFORCED=true` before 0003 is applied would **deny-all** (fails closed, no
+  leak, but the app breaks). Order matters.
+
+## Enable runbook (do in order — each step gated on the previous)
+1. **Apply `0003` to a staging/branch DB first** (Supabase CLI: `supabase db push`, or run the SQL in
+   the SQL editor). Safe even with `RLS_ENFORCED` off — the app is `service_role` (BYPASSRLS) so
+   nothing changes yet; policies only start protecting authenticated/Data-API access.
+2. **Validate the two runtime preconditions on staging** (both fail *closed* if unmet, so verify
+   before trusting enforcement):
+   - The `SUPABASE_DB_URL` role can `SET ROLE authenticated` (Supabase `postgres` normally can). Test:
+     open a psql session as that role and run `set role authenticated;` — must succeed.
+   - With `RLS_ENFORCED=true` on staging, a real user can still read **their own** answers and cannot
+     read another tenant's. Seed two dealerships/users and check `compliance.getAll` for each.
+3. **Flip `RLS_ENFORCED=true`** — it's read via `process.env` (Node) and `Deno.env.get` (Edge). Set it
+   as an Edge secret in `.github/workflows/deploy-functions.yml` and in local `.env`. Deploy.
+4. **Prod:** apply `0003` to prod, smoke-test, then set the prod `RLS_ENFORCED=true` secret + redeploy.
+5. **(Follow-up, same task or next):** extend `scoped()` to the dealership/subscription read/write
+   paths so *all* business queries are authenticated-scoped, not just crown-jewel. Today those stay
+   service-role (they're still app-scoped by `ctx.user.id`, and RLS protects them against Data-API
+   access, but they don't exercise the authenticated role).
 
 ## Relevant files
-- `supabase/migrations/0001_init_schema.sql:70-75` — where RLS is enabled with no policies.
-- `server/db.ts` / `supabase/functions/_shared/db.ts` — the Drizzle helpers; service-role connection.
-- `server/routers.ts:46,104-113` / `supabase/functions/_shared/routers.ts` — every business query
-  and its `getDealershipByUserId` scoping.
-- `server/_core/context.ts` / `supabase/functions/trpc/index.ts` — where the authenticated user
-  (and, post-#1, the AAL) is established.
-- `.agents/skills/supabase-postgres-best-practices/references/security-rls-basics.md` — on-disk RLS reference.
-
-## First moves
-1. Decide RLS-policies vs verified-tenant-guard; write the decision + rationale into today's `done/` log.
-2. If RLS: draft policies for all four business tables and a migration; confirm the Edge query path
-   can run as the authenticated role (this is the crux — validate it before writing every policy).
-3. If tenant-guard: centralize `getDealershipByUserId`-scoped access and add tests that a query
-   without tenant scoping fails.
-4. Add a regression test proving tenant A cannot read tenant B's `compliance_answers`.
+- `supabase/migrations/0003_tenant_isolation_rls.sql` — the policies to apply.
+- `server/db.ts:34` / `supabase/functions/_shared/db.ts:28` — `scoped()` executor (the role-switch).
+- `shared/rls.ts` — claim builder + `isRlsEnforced` flag parser (unit-tested in
+  `server/tenant-guard.test.ts`).
+- `shared/tenant-guard.ts` — the app-layer funnel (already live).
+- `.github/workflows/deploy-functions.yml` — where the `RLS_ENFORCED` Edge secret must be set.
+- `.claude/tasks/done/0002-tenant-isolation.md` — full decision log + review findings.
 
 ## Watch out for
-- **Service role bypasses RLS.** Policies are invisible until queries run as the authenticated role
-  — it's easy to "add policies" and prove nothing. Verify the access path first.
-- Don't break the auto-create-default-dealership path (`server/routers.ts:16-31`).
-- Both runtimes (Express + Deno) must enforce identically.
+- **Ordering:** never set `RLS_ENFORCED=true` before `0003` is applied to that environment → deny-all.
+- **service_role must keep bypassing:** the Stripe webhook (`supabase/functions/stripe-webhook/`) and
+  the auth-bootstrap `createUser` have no user JWT and MUST stay service-role. `0003` does not add
+  policies that block service_role (BYPASSRLS is a role attribute) — don't "fix" that.
+- **Two runtimes / two copies** stay in sync (see CLAUDE.md). Both `db.ts` copies already match.
+- **No `deno` binary locally** → Deno files aren't tsc/vitest-covered; verify Edge behavior on a
+  Supabase branch deploy, not just locally.
 
 ## After this
 **Remediation #3 — Append-only audit trail** (immutable who/what/when; separate store) — PRD
-#34/#51 — **Critical**. Start by logging auth events + every state-changing mutation. This pairs
-naturally with #2 (both are about trustworthy access to tenant data) and begins building the
-examiner/litigation record the product currently lacks entirely.
+#34/#51 — **Critical**. Start by logging auth events (login, MFA step-up, logout) + every
+state-changing mutation (saveSection, subscription changes, document generation). This is the
+examiner/litigation record the product lacks entirely, and it pairs naturally with the now-hardened
+tenant-access layer.

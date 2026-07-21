@@ -1,33 +1,33 @@
 import { protectedProcedure, router } from "./_core/trpc";
 import { z } from "zod";
 import * as db from "./db";
+import { resolveTenantScope } from "@shared/tenant-guard";
 import { generateWISP, generateBoardReport } from "@shared/pdf-generator";
 import { storagePut, storageGetSignedUrl } from "./storage";
 
-async function requirePaidDealership(userId: string) {
-  const dealership = await db.getDealershipByUserId(userId);
-  if (!dealership) throw new Error("No dealership found. Complete your profile first.");
+async function requirePaidScope(userId: string) {
+  const scope = await resolveTenantScope(db, userId);
+  if (!scope) throw new Error("No dealership found. Complete your profile first.");
 
-  const subscription = await db.getSubscription(dealership.id);
+  const subscription = await db.getSubscription(scope.dealershipId);
   if (!subscription || subscription.plan === "free" || subscription.status !== "active") {
     throw new Error("An active Core plan is required to generate documents.");
   }
-  return dealership;
+  return scope;
 }
 
 export const pdfRouter = router({
   // Generate WISP PDF
   generateWISP: protectedProcedure.mutation(async ({ ctx }) => {
-    const dealership = await requirePaidDealership(ctx.user.id);
-    const answers = await db.getAllComplianceAnswers(dealership.id);
+    const scope = await requirePaidScope(ctx.user.id);
+    const answers = await db.getAllComplianceAnswers(scope);
 
-    const pdfBytes = await generateWISP(dealership, answers);
+    const pdfBytes = await generateWISP(scope.dealership, answers);
 
-    const fileName = `wisp-${dealership.id}-${Date.now()}.pdf`;
+    const fileName = `wisp-${scope.dealershipId}-${Date.now()}.pdf`;
     const { url } = await storagePut(fileName, pdfBytes, "application/pdf");
 
-    await db.saveGeneratedDocument({
-      dealershipId: dealership.id,
+    await db.saveGeneratedDocument(scope, {
       docType: "wisp",
       storagePath: fileName,
     });
@@ -37,16 +37,15 @@ export const pdfRouter = router({
 
   // Generate Board Report PDF (score is computed server-side from saved answers)
   generateBoardReport: protectedProcedure.mutation(async ({ ctx }) => {
-    const dealership = await requirePaidDealership(ctx.user.id);
-    const answers = await db.getAllComplianceAnswers(dealership.id);
+    const scope = await requirePaidScope(ctx.user.id);
+    const answers = await db.getAllComplianceAnswers(scope);
 
-    const pdfBytes = await generateBoardReport(dealership, answers);
+    const pdfBytes = await generateBoardReport(scope.dealership, answers);
 
-    const fileName = `board-report-${dealership.id}-${Date.now()}.pdf`;
+    const fileName = `board-report-${scope.dealershipId}-${Date.now()}.pdf`;
     const { url } = await storagePut(fileName, pdfBytes, "application/pdf");
 
-    await db.saveGeneratedDocument({
-      dealershipId: dealership.id,
+    await db.saveGeneratedDocument(scope, {
       docType: "board_report",
       storagePath: fileName,
     });
@@ -58,10 +57,10 @@ export const pdfRouter = router({
   getDocumentUrl: protectedProcedure
     .input(z.object({ docType: z.string() }))
     .query(async ({ ctx, input }) => {
-      const dealership = await db.getDealershipByUserId(ctx.user.id);
-      if (!dealership) throw new Error("No dealership found");
+      const scope = await resolveTenantScope(db, ctx.user.id);
+      if (!scope) throw new Error("No dealership found");
 
-      const docs = await db.getGeneratedDocuments(dealership.id, input.docType);
+      const docs = await db.getGeneratedDocuments(scope, input.docType);
       if (docs.length === 0) return null;
 
       const doc = docs[docs.length - 1];

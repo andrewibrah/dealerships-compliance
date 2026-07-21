@@ -9,3 +9,4 @@ Run the SESSION END protocol from CLAUDE.md:
    severity counts in the executive summary).
 
 Show me the `done/` log and the new NextWork.md before you finish.
+

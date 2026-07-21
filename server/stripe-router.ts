@@ -29,17 +29,7 @@ export const stripeRouter = router({
       // A user can upgrade before saving any answers, so create the dealership if needed
       const dealership =
         (await db.getDealershipByUserId(ctx.user.id)) ??
-        (await db.createDealership({
-          userId: ctx.user.id,
-          name: "My Dealership",
-          address: "",
-          city: "",
-          state: "",
-          dmsVendor: "",
-          rooftopCount: 1,
-          qualifiedIndividual: "",
-          qiEmail: "",
-        }));
+        (await db.createDefaultDealership(ctx.user.id));
 
       const priceId = input.plan === "core" ? CORE_PRICE_ID : MANAGED_PRICE_ID;
       if (!priceId) throw new Error("Price not configured");
