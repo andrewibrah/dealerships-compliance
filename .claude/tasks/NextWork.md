@@ -1,19 +1,16 @@
 # Next Work — handoff for the next session
 
-## Carryover from #3 (operational, human + live-DB — do this first)
-Remediation #3 (audit trail) is **code-complete and verified** (types/tests/lint green, both runtimes
-in sync) but **not yet applied/deployed** — the DB-level append-only + hash-chain enforcement needs a
-live DB and a human. See `.claude/tasks/done/0003-audit-trail.md` for full detail.
-1. **Apply `supabase/migrations/0004_audit_log.sql`** with `supabase db push`. It references
-   `current_user_dealership_ids()` from `0003`; the numeric ordering applies
-   `0003` first. (Note: `0003` itself may still be unapplied — apply both, in order.)
-2. **Validate on a staging/branch deploy** (each fails toward the safe side if unmet):
-   - `update`/`delete`/`truncate` on `audit_log` are rejected **even as `service_role`** (triggers).
-   - `extensions.digest` resolves (pgcrypto in the `extensions` schema — Supabase default).
-   - A real mutation writes a row and `prev_hash`/`row_hash` populate (chain links across ≥2 rows).
-   - Authenticated Data-API read is scoped by the `audit_log_read_own` policy.
-3. **Commit + deploy** on Andrew's go (Edge auto-deploys via `deploy-functions.yml`; `0004` is a
-   human `db push`). No `RLS_ENFORCED` interaction — audit writes are service-role either way.
+## Carryover from #3 (operational validation — do this first)
+Remediation #3 is **deployed**: remote migrations `20260721172935_tenant_isolation_rls` and
+`20260721172940_audit_log` are applied; `trpc` v17, `stripe-webhook` v13, and `handle-signup` v14 are
+ACTIVE. Transactional `service_role` validation proved the hash chain and mutation-blocking triggers.
+Remote-drift reconciliation `20260721173457_reconcile_remote_security_policies` also removed legacy
+OR-combined policies and closed the user-metadata role escalation in the auth trigger.
+1. Run one authenticated state-changing user flow and confirm the Edge writer persists an audit row.
+2. Confirm an authenticated user can read only their own actor/dealership audit rows through the Data API.
+3. Reconcile the repository's numeric migration files with the remote timestamped history before the
+   next CLI migration; the pre-existing remote history was already divergent.
+4. Keep `RLS_ENFORCED` off until the separate two-tenant staging validation from remediation #2 passes.
 
 ---
 

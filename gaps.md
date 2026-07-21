@@ -14,7 +14,7 @@ The shipped product is a **single-tenant FTC Safeguards self-assessment question
 
 | Severity | Count | Themes |
 |---|---|---|
-| **Critical** | 2 | Audit trail #34/#51 is code-complete but still pending live-DB apply, validation, and deploy. *(MFA #47 closed — see `.claude/tasks/done/0001-mfa-enforcement.md`.)* |
+| **Critical** | 2 | Audit trail #34/#51 is deployed with DB enforcement validated; authenticated user-flow/Data-API validation remains. *(MFA #47 closed — see `.claude/tasks/done/0001-mfa-enforcement.md`.)* |
 | **High** | 10 | Object model (#3), law-as-data (#5/#6), explainability/citations (#19), risk-assessment & IRP generators (#20/#23), evidence repo (#31), RLS/tenant isolation (#46), remediation tasks (#24), multi-tenant groups (#2) |
 | **Medium** | ~24 | Adaptive/LLM interview (#10/#11), posture history (#33), recurrence engine (#35), RBAC views (#42), encryption posture doc (#54), retention/deletion (#56), … |
 | **Low** | ~28 | Crosswalks (#8), DMS connectors (#59), SSO (#47-part), white-label (#45), eval harness (#63), observability (#67), separate repos (#65), … |
@@ -97,7 +97,7 @@ Status legend: **Implemented** / **Partial** / **Missing** / **Divergent**. Seve
 | 31 ★ | Evidence repository (encrypted object storage) | Missing | Supabase Storage used only for generated PDFs (`server/pdf-router.ts:27`, `server/storage.ts`) | No evidence upload/store | High | Add an evidence bucket + `evidence` entity; user-uploaded artifacts |
 | 32 | Evidence-to-control linking (one artifact → many controls) | Missing | none | No linking | Med | Join table evidence↔control (depends on #3/#31) |
 | 33 ★ | Continuous posture tracking (state over time) | Missing | scores computed on the fly (`Dashboard.tsx:32-44`, `pdf-generator.ts:55-69`); no history table | No historical snapshots; drift invisible | Med | Snapshot posture over time (score history per control/section) |
-| 34 ★ | Append-only audit trail of every change (who/what/when) | Partial (code-complete 2026-07-21) | `audit_log` (`drizzle/schema.ts`) + `supabase/migrations/0004_audit_log.sql` (append-only triggers + SHA-256 hash chain); `appendAuditLog` in both `db.ts`; every state-changing mutation + auth login/step-up/logout logged in both runtimes; `shared/audit.ts` (unit-tested `server/audit.test.ts`) | Code-complete; DB enforcement + writes not yet applied/deployed (live-DB + human step) | **Critical** | Apply `0004` + branch-deploy validation + deploy — see `.claude/tasks/done/0003-audit-trail.md` |
+| 34 ★ | Append-only audit trail of every change (who/what/when) | Partial (deployed 2026-07-21) | `audit_log` (`drizzle/schema.ts`) + remote migration `20260721172940_audit_log`; append-only triggers + SHA-256 chain validated transactionally as `service_role`; all three Edge Functions deployed; `shared/audit.ts` unit-tested | Real authenticated mutation and tenant-scoped Data-API read still need a user-flow smoke test | **Critical** | Run an authenticated mutation/read smoke test, then close — see `.claude/tasks/done/0003-audit-trail.md` |
 | 35 | Recurrence engine (annual RA, pen test, QI board report; auto-scheduled + nagged) | Missing | no scheduler; `server/email-service.ts` (Resend) defined but **never imported** | No recurrences/reminders | Med | Add scheduled recurrences + wire notifications |
 | 36 | Audit-ready export ("examiner package" / board report) | Partial | board report PDF (`pdf-generator.ts:274-359`) | Board report ✓; no combined examiner package (docs + evidence + audit trail) | Med | Bundle a one-click examiner package once #31/#34 exist |
 
@@ -119,12 +119,12 @@ Status legend: **Implemented** / **Partial** / **Missing** / **Divergent**. Seve
 
 | # | Requirement | Status | Evidence (path:line) | Gap | Sev | Recommended action |
 |---|---|---|---|---|---|---|
-| 46 ★ | Multi-tenant data layer with hard isolation (RLS or per-tenant schema) | Partial (hardened 2026-07-21) | **App-layer tenant-guard shipped + tested**: single funnel `resolveTenantScope` + branded `ScopedDealershipId` with owner re-check (`shared/tenant-guard.ts`); crown-jewel accessors require a `TenantScope` in both runtimes (`server/db.ts`, `supabase/functions/_shared/db.ts`); A-cannot-read-B regression (`server/tenant-guard.test.ts`). **RLS staged, not yet enabled**: policies + `FORCE RLS` + `current_user_dealership_ids()` in `supabase/migrations/0003_tenant_isolation_rls.sql`; flag-gated authenticated-scoping in `scoped()` behind `RLS_ENFORCED` (default off) | DB-level enforcement is written but not applied/enabled; app-layer isolation is now tested defense-in-depth | High | Apply `0003` + validate on staging + flip `RLS_ENFORCED`, then extend scoping to dealership/subscription paths — see `.claude/tasks/NextWork.md`. Detail: `.claude/tasks/done/0002-tenant-isolation.md` |
+| 46 ★ | Multi-tenant data layer with hard isolation (RLS or per-tenant schema) | Partial (hardened 2026-07-21) | **App-layer tenant-guard shipped + tested**: single funnel `resolveTenantScope` + branded `ScopedDealershipId` with owner re-check (`shared/tenant-guard.ts`); crown-jewel accessors require a `TenantScope` in both runtimes (`server/db.ts`, `supabase/functions/_shared/db.ts`); A-cannot-read-B regression (`server/tenant-guard.test.ts`). **RLS applied** as remote migration `20260721172935_tenant_isolation_rls`; flag-gated authenticated-scoping remains behind `RLS_ENFORCED` (default off) | Policies are live, but application role-switch enforcement remains off pending authenticated staging validation | High | Validate two authenticated tenants on staging, then flip `RLS_ENFORCED`; extend scoping to dealership/subscription paths. Detail: `.claude/tasks/done/0002-tenant-isolation.md` |
 | 47 ★ | Auth done right: SSO, enforced MFA, RBAC | Partial | **MFA enforced** (enrolled-only): decision `shared/mfa.ts` (`requiresMfaStepUp`); Node gate `server/_core/trpc.ts:13-30`; Deno gate `supabase/functions/_shared/trpc.ts:10-16`; enroll `client/src/components/MfaEnrollment.tsx`; login step-up `client/src/pages/Login.tsx`. Roles still `user`/`admin` only (`schema.ts:6`) | MFA ✓ (TOTP/AAL2). Remaining: no SSO; no compliance-role RBAC (owner/QI/staff/auditor). Policy is *enrolled-only* (a user who never enrolls isn't gated) | High | SSO + RBAC (#42) next; consider enforce-all MFA if the pilot requires it |
 | 48 | LLM orchestration (routing, prompt/version mgmt, tool-calling) | Missing | `server/_core/llm.ts:143` is a single gpt-4o-mini chat wrapper, never called | No orchestration; unused wrapper | Low | Build when the LLM path is actually needed (#11/#30) |
 | 49 | Deterministic rule-engine service, separate from LLM | Implemented | `shared/scoring.ts` pure module, isolated from `llm.ts` | Cleanly separated (not a standalone service, but decoupled) | — | Keep the separation as LLM features land |
 | 50 | Document-generation service (templating → PDF/DOCX) | Partial | `shared/pdf-generator.ts` (PDF only) | No DOCX; not a discrete service | Low | Add DOCX later; keep in `shared/` |
-| 51 | Append-only audit-log service (separate store, tamper-evident) | Partial (code-complete 2026-07-21) | Ready with #34: DB-enforced append-only (triggers block UPDATE/DELETE/TRUNCATE even for `service_role` BYPASSRLS) + SHA-256 `prev_hash→row_hash` chain (`supabase/migrations/0004_audit_log.sql`) | Tamper-evidence authored; pending live-DB apply/validate | **Critical** | Validate triggers + hash chain on a branch deploy (see #34) |
+| 51 | Append-only audit-log service (separate store, tamper-evident) | Partial (deployed 2026-07-21) | DB-enforced append-only blocks UPDATE/DELETE/TRUNCATE as `service_role`; two-row SHA-256 `prev_hash→row_hash` chain validated and rolled back cleanly; Edge Functions active | Authenticated production-flow write/read smoke test remains | **Critical** | Complete the authenticated smoke test (see #34) |
 | 52 | Async job/queue for long-running agent tasks | Missing | all synchronous (`supabase/functions/trpc/index.ts`) | No queue | Low | Defer until generation/sync is long-running |
 | 53 | Integration connectors behind a stable internal API | Missing | none | No connector layer | Low | Defer (depends on #59/#60) |
 
@@ -174,13 +174,13 @@ Sequenced by **severity first, dependency second** (compliance ground rule: auth
    step-up UI. See `.claude/tasks/done/0001-mfa-enforcement.md`. Remaining #47 sub-gaps: SSO, RBAC.
 2. **Tenant isolation, defense-in-depth** — PRD #46 — **High** — **M** — 🟡 **In progress (2026-07-21)**
    App-layer **tenant-guard shipped + tested** (`resolveTenantScope` funnel + branded scope + A≠B
-   regression). DB-layer **RLS staged** (`0003_tenant_isolation_rls.sql` + flag-gated `scoped()`) but
-   **not yet applied/enabled** — enable runbook in `.claude/tasks/NextWork.md`. See
+   regression). DB-layer **RLS applied** (remote migration `20260721172935_tenant_isolation_rls`),
+   while flag-gated `scoped()` remains disabled pending authenticated staging validation. See
    `.claude/tasks/done/0002-tenant-isolation.md`.
-3. **Append-only audit trail** (immutable, who/what/when; separate store) — PRD #34/#51 — **Critical** — **L** — 🟡 **Code-complete (2026-07-21), pending apply/deploy**
+3. **Append-only audit trail** (immutable, who/what/when; separate store) — PRD #34/#51 — **Critical** — **L** — 🟡 **Deployed (2026-07-21), pending authenticated smoke test**
    Append-only enforced by triggers (not RLS — `service_role` is BYPASSRLS) + SHA-256 hash chain;
-   every mutation + auth event logged in both runtimes. Applying `0004` + branch-deploy validation is
-   the remaining human step. See `.claude/tasks/done/0003-audit-trail.md`.
+   every mutation + auth event logged in both runtimes. DB triggers/hash chain and Edge deployment
+   are live; an authenticated user-flow/Data-API smoke test remains. See `.claude/tasks/done/0003-audit-trail.md`.
 4. **Core compliance object model** (Control, Requirement, Risk, Evidence, Task, Policy, Asset, DataFlow, Attestation) — PRD #3 — **High** — **L**
    *Unblocks #19, #20, #23, #24, #25, #29, #31–33. Migrate the questionnaire onto Control/Requirement.*
 5. **Citation-level explainability** (every gap → §314.4 citation + triggering answer) — PRD #19/#62 — **High** — **M** *(needs #4/#6)*

@@ -109,3 +109,32 @@ recommended before commit/deploy**, consistent with 0002.
 - The direct IPv6 database hostname was unavailable from this network, so it could not bypass the
   pooler for a second-path check. No migration was applied and GitHub was deliberately not pushed,
   preserving the required DB-before-Edge deployment order.
+
+## Deployment completed — 2026-07-21
+- The password-based CLI path remained blocked by Supavisor `28P01`, but the authenticated,
+  project-scoped Supabase MCP exposed the live schema and migration history. The base tables and auth
+  trigger existed; the tenant helper and `audit_log` did not.
+- Applied remote migrations in dependency order:
+  `20260721172935_tenant_isolation_rls`, then `20260721172940_audit_log`.
+- Live transactional validation under `service_role` inserted two audit rows, verified 64-character
+  hashes and `second.prev_hash = first.row_hash`, and proved UPDATE/DELETE/TRUNCATE each raise
+  `insufficient_privilege`. The transaction rolled back; zero validation rows persisted.
+- Verified `pgcrypto` in `extensions`, the tenant helper, `audit_log`, four audit triggers, and the
+  authenticated read policy. Deployed Edge Functions: `trpc` v17, `stripe-webhook` v13,
+  `handle-signup` v14; all report ACTIVE with no Edge error logs. Availability probes returned 204
+  for `trpc`/`stripe-webhook`; `handle-signup` returned expected method-not-allowed for OPTIONS.
+- Remaining live validation: a real authenticated mutation through Edge and cross-tenant Data-API
+  read test (the production database currently has no users/dealerships). `RLS_ENFORCED` stays off
+  until remediation #2's two-tenant staging test passes.
+- Migration-history drift is pre-existing and now explicit: remote history uses timestamps while the
+  repository uses numeric `0001`–`0004`. Reconcile before the next CLI-driven migration.
+- Post-deploy advisors exposed legacy permissive policies that OR-combined with the new tenant
+  policies. In particular, `compliance_answers` could authorize by the caller-controlled legacy
+  `user_id` path instead of dealership ownership. Applied reviewed migration
+  `20260721173457_reconcile_remote_security_policies`: removed four superseded policies, forced the
+  auth signup trigger to assign only `user` (never user-editable metadata `admin`), and revoked direct
+  RPC execution of trigger/security-definer helpers. Verification: zero legacy policies, four strict
+  replacements, and auth trigger EXECUTE denied to anon/authenticated.
+- Final advisor state: the only security warnings are the intentional authenticated EXECUTE grant on
+  `current_user_dealership_ids()` (required by its RLS policies) and Dashboard leaked-password
+  protection being disabled. Performance reports only unused indexes, expected while all tables are empty.
