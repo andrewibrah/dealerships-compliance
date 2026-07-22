@@ -1,76 +1,81 @@
 # Next Work — handoff for the next session
 
-## Carryover from #3 (operational validation — do this first)
-Remediation #3 is **deployed**: remote migrations `20260721172935_tenant_isolation_rls` and
-`20260721172940_audit_log` are applied; `trpc` v17, `stripe-webhook` v13, and `handle-signup` v14 are
-ACTIVE. Transactional `service_role` validation proved the hash chain and mutation-blocking triggers.
-Remote-drift reconciliation `20260721173457_reconcile_remote_security_policies` also removed legacy
-OR-combined policies and closed the user-metadata role escalation in the auth trigger.
-1. Run one authenticated state-changing user flow and confirm the Edge writer persists an audit row.
-2. Confirm an authenticated user can read only their own actor/dealership audit rows through the Data API.
-3. Reconcile the repository's numeric migration files with the remote timestamped history before the
-   next CLI migration; the pre-existing remote history was already divergent.
-4. Keep `RLS_ENFORCED` off until the separate two-tenant staging validation from remediation #2 passes.
+## Carryover from #4 (operational — do first; needs a human + live infra)
+Remediation #4 (object model) is **code-complete, committed, and pushed**: branch
+`feat/prd3-object-model` (`db546a9`), all 9 PRD #3 entities + the `evidence_controls` join, both
+runtimes, migrations `0005–0007`, 116 tests green. NOT merged to main; migrations NOT applied. Full
+detail: `.claude/tasks/done/0004-object-model.md`.
+1. **Apply `0005`/`0006`/`0007` to prod — NOT via `supabase db push`.** `supabase migration list`
+   shows the remote history is timestamped and diverged; the CLI sees numeric `0001–0007` as all
+   pending and would replay `0001–0004` (already live under timestamped names). Safe path: paste
+   `0005/0006/0007` into the Supabase SQL editor (all idempotent), then optionally
+   `supabase migration repair --status applied 0005 0006 0007`. (Reconciling the numeric↔timestamped
+   history — repair `0001–0004` or rename files to timestamps — is a separate cleanup.)
+2. **Create the private `evidence` Storage bucket** (same posture as `documents`) — needed before
+   `evidence.getUrl` works at runtime.
+3. **Merge `feat/prd3-object-model` → main** (opens the edge auto-deploy) once 1–2 are done, so the
+   new procedures have their tables. No client calls them yet (backend-only), so there's no rush/breakage.
+4. **`pnpm db:push`** locally to sync drizzle-kit generated state after applying.
+5. **Composite-FK hardening** (one small migration `0008`): add `(dealership_id, <ref>_id) →
+   <parent>(dealership_id, id)` on `risks.control_id`, `tasks.control_id`,
+   `evidence_controls.control_id` + `.evidence_id`, `data_flows.source/destination_asset_id`,
+   `attestations.policy_id`. (`requirement_id` → global catalog, exempt.) No live leak today; do it
+   before these links get client wiring.
 
 ---
 
 ## Task
-**Remediation #4 — Core compliance object model.** Model the nine first-class entities the PRD
-demands — **Control, Requirement, Risk, Evidence, Task, Policy, Asset, DataFlow, Attestation** — in
-Drizzle, and begin migrating the questionnaire off opaque JSONB onto `Control`/`Requirement`.
-PRD #3 — **High**.
+**Remediation #5 — Citation-level explainability, on top of the JSONB→Control cutover.** Every gap
+must trace to a specific **§314.4 citation + the triggering answer** (PRD #19 — "non-negotiable" per
+PRD — and #62 grounding). PRD #19/#62 — **High**. This rests on #4's `Requirement.citation` spine and
+naturally pairs with finishing the migration the object model only *began*.
 
 ## Cold-start context
-- **Why this is the keystone.** Today compliance state is `compliance_answers.answers` JSONB keyed by
-  question id (`drizzle/schema.ts` `complianceAnswers`). gaps.md's top structural finding: almost
-  every remaining High/Critical gap — citations (#19), risk assessment (#20), IRP (#23), tasks (#24),
-  evidence repo (#31), posture history (#33), attestations (#29) — is **blocked or degraded** by the
-  absence of this model. This unblocks the most downstream work of any remaining item.
-- **What's already in place to build on:**
-  - Tenant seam (#2): `resolveTenantScope` → branded `TenantScope`; scope every new business table
-    to `dealership_id` and route reads/writes through the funnel (`shared/tenant-guard.ts`).
-  - Audit seam (#3): `appendAuditLog` + `AUDIT_ACTIONS` (`shared/audit.ts`) — add actions for the new
-    entities' create/update/delete as you build them.
-  - Deterministic scoring (`shared/scoring.ts`) reads the questionnaire; keep it deterministic (no LLM).
-- **This is a large task (gaps.md "L").** Don't try to land all nine entities + full migration in one
-  session. Recommended first slice: **`Control` + `Requirement`** (the regulatory spine), a migration,
-  the tenant-scoped accessors in both `db.ts` copies, and a read path in both routers — then map the
-  existing 9 sections × questions onto Requirements without breaking current scoring. Sequence the
-  other seven entities (Risk, Evidence, Task, Policy, Asset, DataFlow, Attestation) in follow-ups.
+- **The enabling half is the cutover.** #4 modeled the entities but the questionnaire still writes/reads
+  `compliance_answers.answers` JSONB; `shared/controls.ts` (`deriveControlsFromAnswers`) exists but is
+  **not wired** into the save path or scoring. Do the cutover first, then hang citations off it:
+  1. On `compliance.saveSection`/`saveAnswer`, ALSO upsert derived `Control` rows (status per
+     Requirement) via `upsertControl` — additively, behind the existing JSONB write.
+  2. Move gap derivation to read `Control` + its `Requirement` (which carries `citation`, `weight`,
+     `section`), keeping `shared/scoring.ts` deterministic and its tests green.
+- **Then explainability (#19):** every gap/finding surfaces `§314.4(x)` (from `Requirement.citation`)
+  + the triggering answer (the Control's status + the answer that set it). Surface in the Dashboard
+  gap list and the WISP/board PDFs (`shared/pdf-generator.ts`).
+- **Citations are coarse today** — `Requirement.citation` is section-level (see `shared/requirements.ts`
+  `CITATION_BY_SECTION`). #5 is the moment to refine to per-requirement subsections where they differ
+  (e.g. §314.4(c)(1) access controls vs (c)(5) MFA within "Access Controls"). Keep it grounded — cite
+  the Rule, never generate a citation via LLM (compliance non-negotiable).
 
-## Design sketch (decide + log the choice in the `done/` log, like #2 and #3)
-- **New tables in `drizzle/schema.ts` + a `0005_*.sql` migration** (remember: `ls
-  supabase/migrations/` first — next free is `0005`). Scope each to `dealership_id` with an FK index,
-  and add them to `0003`/`0004`-style RLS (enable + force + tenant policy via
-  `current_user_dealership_ids()`), since RLS is enabled on every table.
-- **Start with `control` + `requirement`**: a Requirement = an atomic, testable §314.4 obligation
-  (citation, applicability, weight); a Control = the dealer's implemented answer/state for a
-  Requirement. This is the #5/#6 "law as data" spine and what #19 citations hang off.
-- **Migration path, not a rewrite**: keep `compliance_answers` working; add a mapping from
-  `(section, questionId)` → `requirement`, and backfill. Don't break `shared/scoring.ts` or the Wizard.
-- **Both runtimes / two copies** stay in sync (CLAUDE.md non-negotiable): schema, both `db.ts`, both
-  router copies, and audit actions for the new mutations.
+## Design sketch (decide + log the choice in the `done/` log)
+- **No new tables likely** — this is wiring + refinement over #4's schema. If per-requirement citations
+  need more structure, extend `Requirement` (a nullable `subsection`/richer `citation`) via a small
+  migration `0009` (confirm next free number; remember the numeric↔timestamped caveat above).
+- **Keep the old JSONB path green** until the Control-derived path is proven — this is a migration,
+  not a rewrite. Tests: `server/scoring.test.ts`, `server/controls.test.ts`.
+- **Deterministic** end-to-end: status + gap + citation are all data-derived. No LLM in the path.
 
 ## Relevant files
-- `drizzle/schema.ts` — add the entity tables; `supabase/migrations/0005_*.sql` — tables + RLS.
-- `shared/safeguards-questions.ts` — the current 9×N questionnaire to map onto Requirements.
-- `shared/scoring.ts` — deterministic scoring that must keep working through the migration.
-- `server/db.ts` / `supabase/functions/_shared/db.ts` — tenant-scoped accessors (both copies).
-- `server/routers.ts` / `supabase/functions/_shared/routers.ts` — new procedures (both copies);
-  add `AUDIT_ACTIONS` entries in `shared/audit.ts` and log each new mutation.
-- `client/src/pages/Wizard.tsx` / `Dashboard.tsx` — consumers of the questionnaire/scoring.
-- `.claude/tasks/done/0003-audit-trail.md`, `0002-tenant-isolation.md` — the seams you build on.
+- `shared/controls.ts` (`deriveControlsFromAnswers` — wire this in), `server/db.ts` +
+  `supabase/functions/_shared/db.ts` (`upsertControl`, `listControls`), both router copies
+  (`compliance.saveSection`/`saveAnswer`).
+- `shared/scoring.ts` (deterministic gap derivation — the thing to migrate onto Controls) + its test.
+- `shared/requirements.ts` (`REQUIREMENT_CATALOG`, `CITATION_BY_SECTION` — refine per-requirement) +
+  `server/requirements-seed.test.ts` / `server/requirements.test.ts` (update if the catalog changes;
+  the seed drift-guard fails if `0005`'s seed and the catalog diverge).
+- `shared/pdf-generator.ts`, `client/src/pages/Dashboard.tsx` (surface the citation + triggering answer).
+- `.claude/tasks/done/0004-object-model.md` — the entities/accessors you build on.
 
 ## Watch out for
-- **Don't break scoring or the Wizard** — this is a migration, keep the old path green until the new
-  one is proven. Tests: `server/scoring.test.ts`.
-- **RLS is enabled on every table with no policy until you add one** — a new table with FORCE RLS and
-  no policy denies all authenticated access. Add the tenant policy in the same migration (see `0003`).
-- **Scope everything to `dealership_id`** through `resolveTenantScope`; audit every new mutation.
-- **No LLM in the compliance path**; keep status deterministic.
-- **No `deno` locally** → verify Edge behavior on a branch deploy, not just `tsc`/vitest.
+- **Don't break scoring or the Wizard.** Keep JSONB authoritative until Control-derived scoring passes
+  the same tests. The Wizard writes JSONB; the cutover is additive first, swap second.
+- **Both runtimes / two copies** stay in sync (schema, both `db.ts`, both routers, audit actions).
+- **RLS**: any new/changed table keeps `enable`+`force` + a tenant (or read-all for global) policy in
+  the same migration — a FORCE-RLS table with no policy denies all authenticated access.
+- **No `deno` / no live DB locally** → verify Edge by mirroring + grep parity; verify migrations on a
+  branch/SQL-editor apply, not `db push` (see carryover #1).
+- **Citation accuracy is a compliance claim** — every §314.4 citation must be correct and grounded.
 
 ## After this
-**Remediation #5 — Citation-level explainability** (every gap → a §314.4 citation + the triggering
-answer) — PRD #19/#62 — **High**. It depends directly on #4's `Requirement` carrying the citation, so
-it slots in naturally once the object model spine exists.
+**Remediation #6 — Written Risk Assessment generator** (PRD #20/#13) — now unblocked: the `Risk`,
+`Asset`, and `DataFlow` entities exist to drive it. Then #7 IRP generator (§314.4(h)), #8 task board
+on the `Task` entity.

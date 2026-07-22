@@ -15,12 +15,12 @@ The shipped product is a **single-tenant FTC Safeguards self-assessment question
 | Severity | Count | Themes |
 |---|---|---|
 | **Critical** | 2 | Audit trail #34/#51 is deployed with DB enforcement validated; authenticated user-flow/Data-API validation remains. *(MFA #47 closed — see `.claude/tasks/done/0001-mfa-enforcement.md`.)* |
-| **High** | 10 | Object model (#3), law-as-data (#5/#6), explainability/citations (#19), risk-assessment & IRP generators (#20/#23), evidence repo (#31), RLS/tenant isolation (#46), remediation tasks (#24), multi-tenant groups (#2) |
+| **High** | 9 | law-as-data (#5/#6), explainability/citations (#19), risk-assessment & IRP generators (#20/#23), evidence repo (#31), RLS/tenant isolation (#46), remediation tasks (#24), multi-tenant groups (#2) |
 | **Medium** | ~24 | Adaptive/LLM interview (#10/#11), posture history (#33), recurrence engine (#35), RBAC views (#42), encryption posture doc (#54), retention/deletion (#56), … |
 | **Low** | ~28 | Crosswalks (#8), DMS connectors (#59), SSO (#47-part), white-label (#45), eval harness (#63), observability (#67), separate repos (#65), … |
-| **Implemented** | 3 | Scope lock (#1), WISP generator (#21), deterministic rule engine separate from LLM (#49) |
+| **Implemented** | 4 | Scope lock (#1), core object model (#3, 2026-07-22), WISP generator (#21), deterministic rule engine separate from LLM (#49) |
 
-**The single most important structural finding:** the app models compliance as `compliance_answers.answers` JSONB blobs keyed by question id (`drizzle/schema.ts:33-47`). PRD #3 demands a first-class object model (Control, Requirement, Risk, Evidence, Task, Policy, Asset, DataFlow, Attestation). Almost every High/Critical gap below (evidence, tasks, audit-linking, citations, risk assessment) is blocked or degraded by the absence of that model.
+**The single most important structural finding (now addressed):** the app modeled compliance as `compliance_answers.answers` JSONB blobs keyed by question id. PRD #3's first-class object model (Control, Requirement, Risk, Evidence, Task, Policy, Asset, DataFlow, Attestation) is now **modeled** (`drizzle/schema.ts`, migrations `0005–0007`, branch `feat/prd3-object-model`) — tenant-scoped, audited, RLS on every table. The remaining half is wiring: the questionnaire still writes/reads JSONB (`deriveControlsFromAnswers` exists but isn't yet in the save/scoring path), so the downstream gaps (citations #19, risk assessment #20, tasks #24, evidence #31) are now **unblocked** but not yet realized.
 
 **Latent/dead code worth knowing:** `invokeLLM` (`server/_core/llm.ts:143`), `generateGapNarrative` (`shared/scoring.ts:141`), and `server/email-service.ts` (Resend) are all defined but **never called/imported** anywhere. There is no live LLM path and no live email/notification path today.
 
@@ -36,7 +36,7 @@ Status legend: **Implemented** / **Partial** / **Missing** / **Divergent**. Seve
 |---|---|---|---|---|---|---|
 | 1 ★ | Lock scope to FTC Safeguards × franchised auto dealers | Implemented | `shared/safeguards-questions.ts:1-22`; `shared/pdf-generator.ts:171-182` | None | — | Keep; document the scope lock in CLAUDE.md |
 | 2 ★ | Multi-tenant from line one: dealer groups own multiple rooftops; rooftop-scoped, group-aggregatable | Divergent | `drizzle/schema.ts:18-31` (one `user_id` owner + `rooftop_count` int); `server/routers.ts:16-31,46-47` (`getDealershipByUserId`, singular) | No group entity; one dealership per user; `rooftop_count` is a number, not scoped data | High | Introduce `dealer_group` → `rooftop` hierarchy; scope all business rows to rooftop, aggregate to group |
-| 3 | Core compliance object model (Control, Requirement, Risk, Evidence, Task, Policy, Asset, DataFlow, Attestation) | Missing | `drizzle/schema.ts:1-78` (only users/dealerships/compliance_answers/subscriptions/generated_documents); answers are JSONB (`:40`) | None of the 9 objects exist; compliance state is opaque JSON | High | Model the 9 entities in Drizzle; migrate the questionnaire onto Control/Requirement |
+| 3 | Core compliance object model (Control, Requirement, Risk, Evidence, Task, Policy, Asset, DataFlow, Attestation) | Implemented (2026-07-22) | All 9 entities + `evidence_controls` join in `drizzle/schema.ts`; migrations `0005–0007`; tenant-scoped accessors + procedures in both runtimes; global §314.4 catalog `shared/requirements.ts`. Branch `feat/prd3-object-model` (`db546a9`) | Model complete, audited, RLS on every table; questionnaire JSONB→Control cutover not yet wired; migrations pending prod apply | — | Wire `deriveControlsFromAnswers` into save + move scoring to Controls — see `.claude/tasks/done/0004-object-model.md` |
 | 4 | Trust boundary: software produces a program, not the auditor/lawyer (drives disclaimers/UI) | Partial | `shared/pdf-generator.ts:265` ("Confidential — for internal, board, auditor, and regulator use"); no "not legal advice" surface in UI | No explicit disclaimer/ToS in the app UI; liability posture implicit | Med | Add a persistent "not legal advice / you remain responsible" disclaimer in UI + generated docs |
 
 ### B. Regulatory brain — "law as data"
@@ -56,7 +56,7 @@ Status legend: **Implemented** / **Partial** / **Missing** / **Divergent**. Seve
 | 10 ★ | Adaptive questionnaire with branching + skip logic | Missing | `client/src/pages/Wizard.tsx:31-38` iterates all sections/questions by index; no branching | Static linear form; asks irrelevant questions | Med | Add a question graph with skip/branch driven by prior answers + applicability (#7) |
 | 11 ★ | Conversational LLM front-end over a structured question graph | Missing | `server/_core/llm.ts:143` (`invokeLLM`) never called; Wizard uses fixed buttons (`Wizard.tsx:13-22`) | No conversational layer | Med | Wire an LLM phrasing layer over the graph; graph guarantees coverage |
 | 12 | Evidence-aware questioning (don't ask what an integration can detect) | Missing | no integrations (#59/#60) | Every question asked manually | Low | Defer; depends on connectors |
-| 13 | Asset + data-flow discovery | Missing | Section 3 asks yes/no about inventory (`safeguards-questions.ts:103-141`) but stores no assets/flows | No Asset/DataFlow capture | Med | Capture assets + data flows as entities (feeds risk assessment #20) |
+| 13 | Asset + data-flow discovery | Partial (2026-07-22) | `assets` + `data_flows` entities modeled (#3; `drizzle/schema.ts`, migration `0007`) with tenant-scoped CRUD in both runtimes | Entities exist; no capture UI and not yet wired into risk assessment (#20) | Med | Build the asset/data-flow capture UX on the new entities; feed #20 |
 | 14 ★ | Multi-stakeholder, multi-session; save/resume everywhere | Partial | Save/resume: `compliance_answers` unique on `(dealership_id, section)` (`schema.ts:46`); `Wizard.tsx:44-52` reloads. But one `user_id` per dealership (`schema.ts:20`) | Save/resume works; no multi-stakeholder (QI vs IT) roles | Med | Add per-rooftop membership + roles so multiple stakeholders answer their sections |
 | 15 | Confidence + clarification loop (re-ask low-confidence) | Missing | no LLM/confidence anywhere | None | Low | Defer; depends on #11 |
 
@@ -77,7 +77,7 @@ Status legend: **Implemented** / **Partial** / **Missing** / **Divergent**. Seve
 |---|---|---|---|---|---|---|
 | 22 | Policy/procedure generation (access control, encryption, MFA, disposal, change mgmt) | Missing | only WISP + board report exist (`pdf-generator.ts:173,274`) | No per-policy generators | Med | Add templated policy generators from control answers + org specifics |
 | 23 ★ | Incident Response Plan generator (§314.4(h)) | Missing | Section 7 asks if an IRP exists (`safeguards-questions.ts:261-300`); no generator | Rule-required artifact not produced | High | Add IRP generator (roles, procedure, 30-day breach-notification timeline) |
-| 24 ★ | Remediation roadmap: gaps → prioritized, assigned, dated tasks | Partial | `shared/pdf-generator.ts:156-168` (`remediationPriorities`) prints ordered gaps in PDFs | Ordering exists; no persisted Task entity, no owner/due-date/tracking | High | Persist tasks (owner, due date, status, evidence link) tied to controls |
+| 24 ★ | Remediation roadmap: gaps → prioritized, assigned, dated tasks | Partial (2026-07-22) | `remediationPriorities` in PDFs (`pdf-generator.ts:156-168`) + `tasks` entity now persisted (#3; status/priority/owner/due/completed, FK to requirement/control), audited CRUD both runtimes | Task entity + tracking fields exist; no task board UI and no auto-derivation of tasks from gaps | High | Build the task board + derive tasks from open controls on the new entity |
 | 25 | Evidence-request checklist auto-generated per open control | Missing | none | No checklist | Med | Generate per-open-control evidence requests (depends on #3/#31) |
 | 26 | Document lifecycle: versioning, draft→review→approve, e-sign, immutable "adopted on" | Partial | `generated_documents.version` defaults 1 (`schema.ts:64`) and is **never incremented** (no `version` write in `server/db.ts`); no approval/e-sign/adopted-on | Static version; no workflow/immutability | Med | Add version bump + draft/review/approve states + adopted-on record |
 
@@ -87,15 +87,15 @@ Status legend: **Implemented** / **Partial** / **Missing** / **Divergent**. Seve
 |---|---|---|---|---|---|---|
 | 27 | Per-control plain-language "why this exists / what breach it prevents" | Partial | `safeguards-questions.ts` optional `hint` fields (e.g. `:34,41,75`) | Hints are terse; not "why/what breach it prevents" | Low | Expand control metadata with a "why it matters" narrative field |
 | 28 | Role-based training modules (QI vs front-desk vs F&I) | Missing | none | No training | Low | Defer (post-pilot moat) |
-| 29 | Staff attestation/acknowledgment tracking (§314.4(e)) | Missing | no attestation entity (`schema.ts`) | Required evidence type missing | Med | Add Attestation entity + acknowledgment tracking |
+| 29 | Staff attestation/acknowledgment tracking (§314.4(e)) | Partial (2026-07-22) | `attestations` entity modeled (#3; type/status/attestor/attested_at, FK to policy/requirement), audited CRUD both runtimes | Entity exists; no acknowledgment-collection flow/UI (send → attest → record) | Med | Build the attestation-collection flow on the new entity |
 | 30 ★ | Signature 10-minute output ("here's your risk, why it matters, here's the fix") | Partial | `client/src/pages/Dashboard.tsx:32-44` (score + section results); WISP remediation section | "Why it matters" narrative is thin; `generateGapNarrative` unused (`scoring.ts:141`) | Med | Deliver a concise risk→why→fix summary view/one-pager |
 
 ### G. Librarian node
 
 | # | Requirement | Status | Evidence (path:line) | Gap | Sev | Recommended action |
 |---|---|---|---|---|---|---|
-| 31 ★ | Evidence repository (encrypted object storage) | Missing | Supabase Storage used only for generated PDFs (`server/pdf-router.ts:27`, `server/storage.ts`) | No evidence upload/store | High | Add an evidence bucket + `evidence` entity; user-uploaded artifacts |
-| 32 | Evidence-to-control linking (one artifact → many controls) | Missing | none | No linking | Med | Join table evidence↔control (depends on #3/#31) |
+| 31 ★ | Evidence repository (encrypted object storage) | Partial (2026-07-22) | `evidence` entity + `evidenceGetSignedUrl` (private `evidence` bucket) modeled (#3; migration `0006`), audited CRUD both runtimes | Entity + signed-URL path exist; the `evidence` bucket isn't created yet and there's no upload UI / signed-upload-URL wiring | High | Create the bucket + build upload UX; encryption = Supabase-managed at rest |
+| 32 | Evidence-to-control linking (one artifact → many controls) | Partial (2026-07-22) | `evidence_controls` join modeled (#3; unique(evidence_id,control_id), tenant-scoped) with `linkEvidenceToControl` / `listEvidenceForControl` | Join + accessors exist; no linking UI; composite-FK hardening on `control_id` pending | Med | Surface linking in UI; add the `(dealership_id, control_id)` composite FK |
 | 33 ★ | Continuous posture tracking (state over time) | Missing | scores computed on the fly (`Dashboard.tsx:32-44`, `pdf-generator.ts:55-69`); no history table | No historical snapshots; drift invisible | Med | Snapshot posture over time (score history per control/section) |
 | 34 ★ | Append-only audit trail of every change (who/what/when) | Partial (deployed 2026-07-21) | `audit_log` (`drizzle/schema.ts`) + remote migration `20260721172940_audit_log`; append-only triggers + SHA-256 chain validated transactionally as `service_role`; all three Edge Functions deployed; `shared/audit.ts` unit-tested | Real authenticated mutation and tenant-scoped Data-API read still need a user-flow smoke test | **Critical** | Run an authenticated mutation/read smoke test, then close — see `.claude/tasks/done/0003-audit-trail.md` |
 | 35 | Recurrence engine (annual RA, pen test, QI board report; auto-scheduled + nagged) | Missing | no scheduler; `server/email-service.ts` (Resend) defined but **never imported** | No recurrences/reminders | Med | Add scheduled recurrences + wire notifications |
@@ -181,9 +181,13 @@ Sequenced by **severity first, dependency second** (compliance ground rule: auth
    Append-only enforced by triggers (not RLS — `service_role` is BYPASSRLS) + SHA-256 hash chain;
    every mutation + auth event logged in both runtimes. DB triggers/hash chain and Edge deployment
    are live; an authenticated user-flow/Data-API smoke test remains. See `.claude/tasks/done/0003-audit-trail.md`.
-4. **Core compliance object model** (Control, Requirement, Risk, Evidence, Task, Policy, Asset, DataFlow, Attestation) — PRD #3 — **High** — **L**
-   *Unblocks #19, #20, #23, #24, #25, #29, #31–33. Migrate the questionnaire onto Control/Requirement.*
-5. **Citation-level explainability** (every gap → §314.4 citation + triggering answer) — PRD #19/#62 — **High** — **M** *(needs #4/#6)*
+4. ~~**Core compliance object model** (Control, Requirement, Risk, Evidence, Task, Policy, Asset, DataFlow, Attestation) — PRD #3 — **High** — **L**~~
+   ✅ **Modeled (2026-07-22)** — all 9 entities + `evidence_controls` join across `drizzle/schema.ts`,
+   migrations `0005–0007`, both runtimes, audited, RLS. Branch `feat/prd3-object-model` (`db546a9`).
+   Remaining tail (→ next): JSONB→Control **cutover** (wire `deriveControlsFromAnswers` + move scoring),
+   apply `0005–0007` to prod, create the `evidence` bucket, composite-FK hardening. See
+   `.claude/tasks/done/0004-object-model.md`. *(Unblocks #19, #20, #23, #24, #25, #29, #31–33.)*
+5. **Citation-level explainability** (every gap → §314.4 citation + triggering answer) — PRD #19/#62 — **High** — **M** *(needs #4/#6; #4 now modeled — `Requirement.citation` is the spine)*
 6. **Written Risk Assessment generator** (first-class, Rule-mandated artifact) — PRD #20/#13 — **High** — **M**
 7. **Incident Response Plan generator** (§314.4(h)) — PRD #23 — **High** — **M**
 8. **Persisted remediation tasks** (owner, due date, status, evidence link) + task board — PRD #24/#40 — **High** — **M** *(needs #4)*
