@@ -1,6 +1,6 @@
 import {
   pgTable, pgEnum, uuid, varchar, text, integer, bigint, boolean,
-  timestamp, jsonb, unique, index,
+  timestamp, jsonb, unique, index, foreignKey,
 } from 'drizzle-orm/pg-core';
 
 export const roleEnum = pgEnum('role', ['user', 'admin']);
@@ -129,6 +129,8 @@ export const controls = pgTable('controls', {
   updatedAt: timestamp('updated_at').notNull().defaultNow(),
 }, (t) => [
   unique().on(t.dealershipId, t.requirementId),
+  // Referenceable target for the composite tenant FKs on risks/tasks/evidence_controls (0008).
+  unique('controls_dealership_id_id_key').on(t.dealershipId, t.id),
   index('controls_dealership_id_idx').on(t.dealershipId),
   index('controls_requirement_id_idx').on(t.requirementId),
 ]);
@@ -150,6 +152,12 @@ export const risks = pgTable('risks', {
   index('risks_dealership_id_idx').on(t.dealershipId),
   index('risks_requirement_id_idx').on(t.requirementId),
   index('risks_control_id_idx').on(t.controlId),
+  // Composite tenant FK (0008): a risk's control must belong to the same dealership.
+  foreignKey({
+    name: 'risks_dealership_id_control_id_fkey',
+    columns: [t.dealershipId, t.controlId],
+    foreignColumns: [controls.dealershipId, controls.id],
+  }),
 ]);
 
 // Core compliance object model, batch 2 (PRD #22/#24/#26/#31/#32). All TENANT-SCOPED
@@ -171,7 +179,11 @@ export const evidence = pgTable('evidence', {
   uploadedBy: uuid('uploaded_by').references(() => users.id),
   createdAt: timestamp('created_at').notNull().defaultNow(),
   updatedAt: timestamp('updated_at').notNull().defaultNow(),
-}, (t) => [index('evidence_dealership_id_idx').on(t.dealershipId)]);
+}, (t) => [
+  index('evidence_dealership_id_idx').on(t.dealershipId),
+  // Referenceable target for the composite tenant FK on evidence_controls.evidence_id (0008).
+  unique('evidence_dealership_id_id_key').on(t.dealershipId, t.id),
+]);
 
 // Evidence <-> Control join (PRD #31/#32). dealership_id is carried so RLS can scope the
 // join row directly; unique on (evidence_id, control_id) makes re-linking idempotent.
@@ -186,6 +198,17 @@ export const evidenceControls = pgTable('evidence_controls', {
   index('evidence_controls_dealership_id_idx').on(t.dealershipId),
   index('evidence_controls_evidence_id_idx').on(t.evidenceId),
   index('evidence_controls_control_id_idx').on(t.controlId),
+  // Composite tenant FKs (0008): both the evidence and the control must be same-dealership.
+  foreignKey({
+    name: 'evidence_controls_dealership_id_control_id_fkey',
+    columns: [t.dealershipId, t.controlId],
+    foreignColumns: [controls.dealershipId, controls.id],
+  }),
+  foreignKey({
+    name: 'evidence_controls_dealership_id_evidence_id_fkey',
+    columns: [t.dealershipId, t.evidenceId],
+    foreignColumns: [evidence.dealershipId, evidence.id],
+  }),
 ]);
 
 // Tasks — remediation tasks that close a gap (PRD #24). owner is free-text for now (RBAC
@@ -209,6 +232,12 @@ export const tasks = pgTable('tasks', {
   index('tasks_dealership_id_idx').on(t.dealershipId),
   index('tasks_requirement_id_idx').on(t.requirementId),
   index('tasks_control_id_idx').on(t.controlId),
+  // Composite tenant FK (0008): a task's control must belong to the same dealership.
+  foreignKey({
+    name: 'tasks_dealership_id_control_id_fkey',
+    columns: [t.dealershipId, t.controlId],
+    foreignColumns: [controls.dealershipId, controls.id],
+  }),
 ]);
 
 // Policies — written policies/procedures (PRD #22/#26). Version-bump-on-edit and workflow
@@ -230,6 +259,8 @@ export const policies = pgTable('policies', {
 }, (t) => [
   index('policies_dealership_id_idx').on(t.dealershipId),
   index('policies_requirement_id_idx').on(t.requirementId),
+  // Referenceable target for the composite tenant FK on attestations.policy_id (0008).
+  unique('policies_dealership_id_id_key').on(t.dealershipId, t.id),
 ]);
 
 // Core compliance object model, batch 3 (PRD #13/#29) — completes the 9 PRD #3 entities.
@@ -250,7 +281,11 @@ export const assets = pgTable('assets', {
   vendor: text('vendor').notNull().default(''),
   createdAt: timestamp('created_at').notNull().defaultNow(),
   updatedAt: timestamp('updated_at').notNull().defaultNow(),
-}, (t) => [index('assets_dealership_id_idx').on(t.dealershipId)]);
+}, (t) => [
+  index('assets_dealership_id_idx').on(t.dealershipId),
+  // Referenceable target for the composite tenant FKs on data_flows.*_asset_id (0008).
+  unique('assets_dealership_id_id_key').on(t.dealershipId, t.id),
+]);
 
 // Data flows — how NPI moves between assets / external parties (PRD #13). source/destination
 // asset ids follow the same raw-id + dealership_id-forced-from-scope pattern as risks.control_id
@@ -272,6 +307,17 @@ export const dataFlows = pgTable('data_flows', {
   index('data_flows_dealership_id_idx').on(t.dealershipId),
   index('data_flows_source_asset_id_idx').on(t.sourceAssetId),
   index('data_flows_destination_asset_id_idx').on(t.destinationAssetId),
+  // Composite tenant FKs (0008): both endpoints must be same-dealership assets.
+  foreignKey({
+    name: 'data_flows_dealership_id_source_asset_id_fkey',
+    columns: [t.dealershipId, t.sourceAssetId],
+    foreignColumns: [assets.dealershipId, assets.id],
+  }),
+  foreignKey({
+    name: 'data_flows_dealership_id_destination_asset_id_fkey',
+    columns: [t.dealershipId, t.destinationAssetId],
+    foreignColumns: [assets.dealershipId, assets.id],
+  }),
 ]);
 
 // Attestations — staff attestations of policy/training/access review (PRD #29, §314.4(e)).
@@ -292,6 +338,12 @@ export const attestations = pgTable('attestations', {
 }, (t) => [
   index('attestations_dealership_id_idx').on(t.dealershipId),
   index('attestations_policy_id_idx').on(t.policyId),
+  // Composite tenant FK (0008): an attestation's policy must belong to the same dealership.
+  foreignKey({
+    name: 'attestations_dealership_id_policy_id_fkey',
+    columns: [t.dealershipId, t.policyId],
+    foreignColumns: [policies.dealershipId, policies.id],
+  }),
 ]);
 
 // Append-only, tamper-evident audit trail (PRD #34 / #51). An immutable who/what/when

@@ -2,8 +2,9 @@ import { systemRouter } from './_core/systemRouter';
 import { publicProcedure, router, protectedProcedure } from './_core/trpc';
 import { z } from 'zod';
 import * as db from './db';
-import { resolveTenantScope } from '@shared/tenant-guard';
+import { resolveTenantScope, type TenantScope } from '@shared/tenant-guard';
 import { AUDIT_ACTIONS } from '@shared/audit';
+import { deriveControlStatus, type AnswerValue } from '@shared/controls';
 import { storageGetSignedUrl, evidenceGetSignedUrl } from './storage';
 import { pdfRouter } from './pdf-router';
 import { stripeRouter } from './stripe-router';
@@ -14,6 +15,33 @@ const complianceAnswerValueSchema = z.union([
   z.boolean(),
   z.null(),
 ]);
+
+// JSONB -> Control cutover (PRD #5). Additively project a saved section's answers onto derived
+// Control rows — one per answered requirement present in the GLOBAL catalog. Runs AFTER the
+// authoritative compliance_answers JSONB write, never replacing it. Deterministic: the status
+// comes straight from deriveControlStatus (no LLM). Always writes source: 'questionnaire'. Codes
+// with no catalog match are skipped. Returns the number upserted (surfaced in the save audit
+// metadata). Mirrored EXACTLY in supabase/functions/_shared/routers.ts.
+async function upsertDerivedControls(
+  scope: TenantScope,
+  answers: Record<string, AnswerValue>,
+): Promise<number> {
+  const catalog = await db.listRequirements();
+  const requirementIdByCode = new Map(catalog.map((r) => [r.code, r.id]));
+  let controlsUpserted = 0;
+  for (const [code, value] of Object.entries(answers)) {
+    const requirementId = requirementIdByCode.get(code);
+    if (requirementId === undefined) continue;
+    await db.upsertControl(scope, {
+      requirementId,
+      status: deriveControlStatus(value),
+      notes: '',
+      source: 'questionnaire',
+    });
+    controlsUpserted += 1;
+  }
+  return controlsUpserted;
+}
 
 export const appRouter = router({
   system: systemRouter,
@@ -146,13 +174,14 @@ export const appRouter = router({
           sectionName: input.sectionName,
           answers: input.answers,
         });
+        const controlsUpserted = await upsertDerivedControls(scope, input.answers);
         await db.appendAuditLog({
           action: AUDIT_ACTIONS.complianceSaveSection,
           actor: { userId: ctx.user.id, email: ctx.user.email },
           entityType: 'compliance_answer',
           entityId: input.section,
           dealershipId: scope.dealershipId,
-          metadata: { section: input.section, sectionName: input.sectionName },
+          metadata: { section: input.section, sectionName: input.sectionName, controlsUpserted },
         });
         return { success: true };
       }),
@@ -178,6 +207,7 @@ export const appRouter = router({
           completed: input.completed !== undefined ? Boolean(input.completed) : undefined,
           completedAt: input.completed ? new Date() : null,
         });
+        const controlsUpserted = await upsertDerivedControls(scope, input.answers);
         await db.appendAuditLog({
           action: AUDIT_ACTIONS.complianceSaveSection,
           actor: { userId: ctx.user.id, email: ctx.user.email },
@@ -188,6 +218,7 @@ export const appRouter = router({
             section: input.section,
             sectionName: input.sectionName,
             completed: input.completed !== undefined ? Boolean(input.completed) : undefined,
+            controlsUpserted,
           },
         });
         return { success: true };
