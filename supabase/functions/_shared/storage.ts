@@ -2,6 +2,7 @@ import { StorageClient } from 'npm:@supabase/storage-js';
 import { ENV } from './env.ts';
 
 const BUCKET = 'documents';
+const EVIDENCE_BUCKET = 'evidence';
 const SIGNED_URL_TTL_SECONDS = 60 * 60; // 1 hour
 
 function getStorageClient() {
@@ -30,5 +31,15 @@ export async function storageGetSignedUrl(key: string): Promise<string> {
   const storage = getStorageClient();
   const { data, error } = await storage.from(BUCKET).createSignedUrl(key, SIGNED_URL_TTL_SECONDS);
   if (error || !data) throw new Error(`Failed to sign download URL: ${error?.message ?? 'unknown'}`);
+  return data.signedUrl;
+}
+
+// Evidence bucket variant — same signing pattern as above, against the private `evidence`
+// bucket (PRD #31/#32). Callers must pass a tenant-scoped row's storage_path.
+export async function evidenceGetSignedUrl(key: string): Promise<string> {
+  if (key.startsWith('http')) return key;
+  const storage = getStorageClient();
+  const { data, error } = await storage.from(EVIDENCE_BUCKET).createSignedUrl(key, SIGNED_URL_TTL_SECONDS);
+  if (error || !data) throw new Error(`Failed to sign evidence download URL: ${error?.message ?? 'unknown'}`);
   return data.signedUrl;
 }

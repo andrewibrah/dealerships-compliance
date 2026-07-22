@@ -19,6 +19,21 @@ export const AUDIT_ACTIONS = {
   subscriptionCreate: 'subscription.create',
   subscriptionUpdateStatus: 'subscription.update_status',
   documentGenerate: 'document.generate',
+  controlUpsert: 'control.upsert',
+  riskCreate: 'risk.create',
+  riskUpdate: 'risk.update',
+  evidenceCreate: 'evidence.create',
+  evidenceLinkControl: 'evidence.link_control',
+  taskCreate: 'task.create',
+  taskUpdate: 'task.update',
+  policyCreate: 'policy.create',
+  policyUpdate: 'policy.update',
+  assetCreate: 'asset.create',
+  assetUpdate: 'asset.update',
+  dataFlowCreate: 'data_flow.create',
+  dataFlowUpdate: 'data_flow.update',
+  attestationCreate: 'attestation.create',
+  attestationUpdate: 'attestation.update',
 } as const;
 
 export type AuditAction = (typeof AUDIT_ACTIONS)[keyof typeof AUDIT_ACTIONS];

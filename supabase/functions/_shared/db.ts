@@ -1,16 +1,23 @@
 import { drizzle } from 'npm:drizzle-orm/postgres-js';
 import postgres from 'npm:postgres';
-import { eq, and, sql } from 'npm:drizzle-orm';
+import { eq, and, asc, inArray, sql } from 'npm:drizzle-orm';
 import { ENV } from './env.ts';
 import {
   users, dealerships, complianceAnswers, subscriptions, generatedDocuments, auditLog,
+  requirements, controls, risks, evidence, evidenceControls, tasks, policies, assets, dataFlows, attestations,
   type User, type Dealership, type ComplianceAnswer, type Subscription, type GeneratedDocument,
+  type Requirement, type Control, type Risk, type Evidence, type Task, type Policy,
+  type Asset, type DataFlow, type Attestation,
 } from '../../../drizzle/schema.ts';
 import type { TenantScope } from '../../../shared/tenant-guard.ts';
+import type { ControlStatus } from '../../../shared/controls.ts';
 import { AUTHENTICATED_ROLE, JWT_CLAIMS_SETTING, buildJwtClaims, isRlsEnforced } from '../../../shared/rls.ts';
 import { writeAuditSafely, type AuditEventInput } from '../../../shared/audit.ts';
 
-const SCHEMA = { users, dealerships, complianceAnswers, subscriptions, generatedDocuments, auditLog };
+const SCHEMA = {
+  users, dealerships, complianceAnswers, subscriptions, generatedDocuments, auditLog,
+  requirements, controls, risks, evidence, evidenceControls, tasks, policies, assets, dataFlows, attestations,
+};
 
 function getDb() {
   const client = postgres(ENV.supabaseDbUrl, { prepare: false });
@@ -172,6 +179,297 @@ export function getGeneratedDocuments(scope: TenantScope) {
   );
 }
 
+// Requirements — GLOBAL FTC Safeguards catalog (PRD #3). Mirrors server/db.ts: not
+// tenant-scoped, unscoped service-role read (RLS grants read-all to authenticated).
+export async function listRequirements() {
+  const db = getDb();
+  return db.select().from(requirements).orderBy(asc(requirements.section), asc(requirements.id));
+}
+
+// Controls — crown-jewel tenant data: TenantScope-only (mirrors server/db.ts).
+export function listControls(scope: TenantScope) {
+  return scoped(scope.userId, async (tx) =>
+    tx.select().from(controls).where(eq(controls.dealershipId, scope.dealershipId)),
+  );
+}
+
+export function upsertControl(
+  scope: TenantScope,
+  input: { requirementId: number; status: ControlStatus; notes: string; source: string },
+) {
+  return scoped(scope.userId, async (tx) => {
+    const [row] = await tx
+      .insert(controls)
+      .values({
+        dealershipId: scope.dealershipId,
+        requirementId: input.requirementId,
+        status: input.status,
+        notes: input.notes,
+        source: input.source,
+      })
+      .onConflictDoUpdate({
+        target: [controls.dealershipId, controls.requirementId],
+        set: { status: input.status, notes: input.notes, source: input.source, updatedAt: new Date() },
+      })
+      .returning();
+    return row;
+  });
+}
+
+// Risks — crown-jewel tenant data: TenantScope-only (mirrors server/db.ts). updateRisk
+// re-filters by dealership so a client-supplied id can never reach another tenant's row.
+export function listRisks(scope: TenantScope) {
+  return scoped(scope.userId, async (tx) =>
+    tx.select().from(risks).where(eq(risks.dealershipId, scope.dealershipId)),
+  );
+}
+
+export function createRisk(
+  scope: TenantScope,
+  input: Omit<typeof risks.$inferInsert, 'id' | 'dealershipId' | 'createdAt' | 'updatedAt'>,
+) {
+  return scoped(scope.userId, async (tx) => {
+    const [row] = await tx.insert(risks).values({ ...input, dealershipId: scope.dealershipId }).returning();
+    return row;
+  });
+}
+
+export function updateRisk(
+  scope: TenantScope,
+  id: number,
+  input: Partial<Omit<typeof risks.$inferInsert, 'id' | 'dealershipId' | 'createdAt' | 'updatedAt'>>,
+) {
+  return scoped(scope.userId, async (tx) => {
+    const [row] = await tx
+      .update(risks)
+      .set({ ...input, updatedAt: new Date() })
+      .where(and(eq(risks.id, id), eq(risks.dealershipId, scope.dealershipId)))
+      .returning();
+    return row ?? null;
+  });
+}
+
+// Evidence — crown-jewel tenant data: uploaded artifacts substantiating controls (PRD
+// #31/#32). TenantScope-only (mirrors server/db.ts). The file lives in the private
+// `evidence` Storage bucket, signed via evidenceGetSignedUrl in storage.ts.
+export function listEvidence(scope: TenantScope) {
+  return scoped(scope.userId, async (tx) =>
+    tx.select().from(evidence).where(eq(evidence.dealershipId, scope.dealershipId)),
+  );
+}
+
+export function createEvidence(
+  scope: TenantScope,
+  input: Omit<typeof evidence.$inferInsert, 'id' | 'dealershipId' | 'createdAt' | 'updatedAt'>,
+) {
+  return scoped(scope.userId, async (tx) => {
+    const [row] = await tx.insert(evidence).values({ ...input, dealershipId: scope.dealershipId }).returning();
+    return row;
+  });
+}
+
+// Evidence <-> Control link. dealership_id forced from scope; onConflict on the
+// (evidence_id, control_id) unique makes re-linking idempotent (null on a no-op).
+export function linkEvidenceToControl(
+  scope: TenantScope,
+  input: { evidenceId: number; controlId: number },
+) {
+  return scoped(scope.userId, async (tx) => {
+    const [row] = await tx
+      .insert(evidenceControls)
+      .values({ dealershipId: scope.dealershipId, evidenceId: input.evidenceId, controlId: input.controlId })
+      .onConflictDoNothing({ target: [evidenceControls.evidenceId, evidenceControls.controlId] })
+      .returning();
+    return row ?? null;
+  });
+}
+
+// Evidence linked to a control, as Evidence rows. Both queries are dealership-scoped so a
+// client-supplied controlId can only ever surface the caller's own evidence.
+export function listEvidenceForControl(scope: TenantScope, controlId: number) {
+  return scoped(scope.userId, async (tx) => {
+    const links = await tx
+      .select({ evidenceId: evidenceControls.evidenceId })
+      .from(evidenceControls)
+      .where(and(
+        eq(evidenceControls.dealershipId, scope.dealershipId),
+        eq(evidenceControls.controlId, controlId),
+      ));
+    if (links.length === 0) return [];
+    const ids = links.map((l) => l.evidenceId);
+    return tx
+      .select()
+      .from(evidence)
+      .where(and(eq(evidence.dealershipId, scope.dealershipId), inArray(evidence.id, ids)));
+  });
+}
+
+// Tasks — crown-jewel tenant data: remediation tasks (PRD #24). TenantScope-only (mirrors
+// server/db.ts). updateTask re-filters by dealership so a client-supplied id can never
+// reach another tenant's row.
+export function listTasks(scope: TenantScope) {
+  return scoped(scope.userId, async (tx) =>
+    tx.select().from(tasks).where(eq(tasks.dealershipId, scope.dealershipId)),
+  );
+}
+
+export function createTask(
+  scope: TenantScope,
+  input: Omit<typeof tasks.$inferInsert, 'id' | 'dealershipId' | 'createdAt' | 'updatedAt'>,
+) {
+  return scoped(scope.userId, async (tx) => {
+    const [row] = await tx.insert(tasks).values({ ...input, dealershipId: scope.dealershipId }).returning();
+    return row;
+  });
+}
+
+export function updateTask(
+  scope: TenantScope,
+  id: number,
+  input: Partial<Omit<typeof tasks.$inferInsert, 'id' | 'dealershipId' | 'createdAt' | 'updatedAt'>>,
+) {
+  return scoped(scope.userId, async (tx) => {
+    const [row] = await tx
+      .update(tasks)
+      .set({ ...input, updatedAt: new Date() })
+      .where(and(eq(tasks.id, id), eq(tasks.dealershipId, scope.dealershipId)))
+      .returning();
+    return row ?? null;
+  });
+}
+
+// Policies — crown-jewel tenant data: written policies/procedures (PRD #22/#26).
+// TenantScope-only (mirrors server/db.ts); updatePolicy re-filters by dealership.
+export function listPolicies(scope: TenantScope) {
+  return scoped(scope.userId, async (tx) =>
+    tx.select().from(policies).where(eq(policies.dealershipId, scope.dealershipId)),
+  );
+}
+
+export function createPolicy(
+  scope: TenantScope,
+  input: Omit<typeof policies.$inferInsert, 'id' | 'dealershipId' | 'createdAt' | 'updatedAt'>,
+) {
+  return scoped(scope.userId, async (tx) => {
+    const [row] = await tx.insert(policies).values({ ...input, dealershipId: scope.dealershipId }).returning();
+    return row;
+  });
+}
+
+export function updatePolicy(
+  scope: TenantScope,
+  id: number,
+  input: Partial<Omit<typeof policies.$inferInsert, 'id' | 'dealershipId' | 'createdAt' | 'updatedAt'>>,
+) {
+  return scoped(scope.userId, async (tx) => {
+    const [row] = await tx
+      .update(policies)
+      .set({ ...input, updatedAt: new Date() })
+      .where(and(eq(policies.id, id), eq(policies.dealershipId, scope.dealershipId)))
+      .returning();
+    return row ?? null;
+  });
+}
+
+// Assets — crown-jewel tenant data: the inventoried asset register (PRD #13; feeds risk
+// assessment #20). TenantScope-only (mirrors server/db.ts); updateAsset re-filters by dealership.
+export function listAssets(scope: TenantScope) {
+  return scoped(scope.userId, async (tx) =>
+    tx.select().from(assets).where(eq(assets.dealershipId, scope.dealershipId)),
+  );
+}
+
+export function createAsset(
+  scope: TenantScope,
+  input: Omit<typeof assets.$inferInsert, 'id' | 'dealershipId' | 'createdAt' | 'updatedAt'>,
+) {
+  return scoped(scope.userId, async (tx) => {
+    const [row] = await tx.insert(assets).values({ ...input, dealershipId: scope.dealershipId }).returning();
+    return row;
+  });
+}
+
+export function updateAsset(
+  scope: TenantScope,
+  id: number,
+  input: Partial<Omit<typeof assets.$inferInsert, 'id' | 'dealershipId' | 'createdAt' | 'updatedAt'>>,
+) {
+  return scoped(scope.userId, async (tx) => {
+    const [row] = await tx
+      .update(assets)
+      .set({ ...input, updatedAt: new Date() })
+      .where(and(eq(assets.id, id), eq(assets.dealershipId, scope.dealershipId)))
+      .returning();
+    return row ?? null;
+  });
+}
+
+// Data flows — crown-jewel tenant data: how NPI moves between assets/external parties (PRD
+// #13). TenantScope-only (mirrors server/db.ts); updateDataFlow re-filters by dealership.
+export function listDataFlows(scope: TenantScope) {
+  return scoped(scope.userId, async (tx) =>
+    tx.select().from(dataFlows).where(eq(dataFlows.dealershipId, scope.dealershipId)),
+  );
+}
+
+export function createDataFlow(
+  scope: TenantScope,
+  input: Omit<typeof dataFlows.$inferInsert, 'id' | 'dealershipId' | 'createdAt' | 'updatedAt'>,
+) {
+  return scoped(scope.userId, async (tx) => {
+    const [row] = await tx.insert(dataFlows).values({ ...input, dealershipId: scope.dealershipId }).returning();
+    return row;
+  });
+}
+
+export function updateDataFlow(
+  scope: TenantScope,
+  id: number,
+  input: Partial<Omit<typeof dataFlows.$inferInsert, 'id' | 'dealershipId' | 'createdAt' | 'updatedAt'>>,
+) {
+  return scoped(scope.userId, async (tx) => {
+    const [row] = await tx
+      .update(dataFlows)
+      .set({ ...input, updatedAt: new Date() })
+      .where(and(eq(dataFlows.id, id), eq(dataFlows.dealershipId, scope.dealershipId)))
+      .returning();
+    return row ?? null;
+  });
+}
+
+// Attestations — crown-jewel tenant data: staff attestations (PRD #29, §314.4(e)).
+// TenantScope-only (mirrors server/db.ts); updateAttestation re-filters by dealership.
+export function listAttestations(scope: TenantScope) {
+  return scoped(scope.userId, async (tx) =>
+    tx.select().from(attestations).where(eq(attestations.dealershipId, scope.dealershipId)),
+  );
+}
+
+export function createAttestation(
+  scope: TenantScope,
+  input: Omit<typeof attestations.$inferInsert, 'id' | 'dealershipId' | 'createdAt' | 'updatedAt'>,
+) {
+  return scoped(scope.userId, async (tx) => {
+    const [row] = await tx.insert(attestations).values({ ...input, dealershipId: scope.dealershipId }).returning();
+    return row;
+  });
+}
+
+export function updateAttestation(
+  scope: TenantScope,
+  id: number,
+  input: Partial<Omit<typeof attestations.$inferInsert, 'id' | 'dealershipId' | 'createdAt' | 'updatedAt'>>,
+) {
+  return scoped(scope.userId, async (tx) => {
+    const [row] = await tx
+      .update(attestations)
+      .set({ ...input, updatedAt: new Date() })
+      .where(and(eq(attestations.id, id), eq(attestations.dealershipId, scope.dealershipId)))
+      .returning();
+    return row ?? null;
+  });
+}
+
 // Audit trail — append-only, tamper-evident (PRD #34 / #51). Mirrors server/db.ts:
 // written as service_role, immutability + hash chain DB-enforced (0004), fail-open.
 export function appendAuditLog(event: AuditEventInput): Promise<void> {
@@ -180,4 +478,4 @@ export function appendAuditLog(event: AuditEventInput): Promise<void> {
   }, event);
 }
 
-export type { User, Dealership, ComplianceAnswer, Subscription, GeneratedDocument };
+export type { User, Dealership, ComplianceAnswer, Subscription, GeneratedDocument, Requirement, Control, Risk, Evidence, Task, Policy, Asset, DataFlow, Attestation };
