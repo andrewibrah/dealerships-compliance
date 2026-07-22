@@ -1,7 +1,7 @@
 import { Card } from "@/components/ui/card";
 import { Progress } from "@/components/ui/progress";
 import { Button } from "@/components/ui/button";
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { useLocation } from "wouter";
 import { SAFEGUARDS_SECTIONS } from "@shared/safeguards-questions";
 import { calculateSectionScore, calculateOverallScore } from "@shared/scoring";
@@ -56,7 +56,14 @@ export default function Wizard() {
       toast.error("Failed to save answer: " + error.message);
     },
   });
-  const isSaving = saveSection.isPending;
+  const saveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  // Cancel any pending debounced save when the component unmounts
+  useEffect(() => {
+    return () => {
+      if (saveTimer.current) clearTimeout(saveTimer.current);
+    };
+  }, []);
 
   // Calculate scores whenever answers change
   useEffect(() => {
@@ -83,6 +90,21 @@ export default function Wizard() {
     }
   }, [answers]);
 
+  const persistSection = (nextSectionAnswers: Record<string, any>) => {
+    const scoreResult = calculateSectionScore(nextSectionAnswers, section.questions);
+    const completed = section.questions.every(
+      (q) => nextSectionAnswers[q.id] !== undefined && nextSectionAnswers[q.id] !== ""
+    );
+
+    saveSection.mutate({
+      section: sectionNumber,
+      sectionName: section.name,
+      answers: nextSectionAnswers,
+      score: scoreResult.score,
+      completed,
+    });
+  };
+
   const handleAnswer = (questionId: string, value: any) => {
     if (!isAuthenticated) {
       toast.error("Please log in to save your answers");
@@ -100,18 +122,29 @@ export default function Wizard() {
       [sectionNumber]: nextSectionAnswers,
     }));
 
-    const scoreResult = calculateSectionScore(nextSectionAnswers, section.questions);
-    const completed = section.questions.every(
-      (q) => nextSectionAnswers[q.id] !== undefined && nextSectionAnswers[q.id] !== ""
-    );
+    persistSection(nextSectionAnswers);
+  };
 
-    saveSection.mutate({
-      section: sectionNumber,
-      sectionName: section.name,
-      answers: nextSectionAnswers,
-      score: scoreResult.score,
-      completed,
-    });
+  const handleTextChange = (questionId: string, value: string) => {
+    if (!isAuthenticated) {
+      toast.error("Please log in to save your answers");
+      return;
+    }
+
+    const nextSectionAnswers = {
+      ...(answers[sectionNumber] ?? {}),
+      [questionId]: value,
+    };
+
+    // Update local state immediately so typing stays responsive
+    setAnswers((prev) => ({
+      ...prev,
+      [sectionNumber]: nextSectionAnswers,
+    }));
+
+    // Debounce the network save so we don't fire a mutation per keystroke
+    if (saveTimer.current) clearTimeout(saveTimer.current);
+    saveTimer.current = setTimeout(() => persistSection(nextSectionAnswers), 600);
   };
 
   const getRiskColor = () => {
@@ -271,7 +304,6 @@ export default function Wizard() {
                               variant={isOn ? "default" : "outline"}
                               className={isOn ? selectedClass : ""}
                               onClick={() => handleAnswer(question.id, value)}
-                              disabled={isSaving}
                             >
                               {/* Shape channel: selection must not rest on hue alone.
                                   Reserved when unselected so the row does not reflow. */}
@@ -293,9 +325,8 @@ export default function Wizard() {
                         className="w-full bg-slate-900 border border-slate-600 rounded px-3 py-2 text-white placeholder-slate-500"
                         placeholder="Enter your response..."
                         value={selected || ""}
-                        onChange={(e) => handleAnswer(question.id, e.target.value)}
+                        onChange={(e) => handleTextChange(question.id, e.target.value)}
                         rows={3}
-                        disabled={isSaving}
                       />
                     )}
                   </div>
