@@ -1,7 +1,7 @@
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { Progress } from "@/components/ui/progress";
-import { AlertTriangle, CheckCircle2, AlertCircle, TrendingUp, Loader2 } from "lucide-react";
+import { AlertTriangle, CheckCircle2, AlertCircle, TrendingUp, Loader2, FileText } from "lucide-react";
 import { useLocation } from "wouter";
 import { useAuth } from "@/hooks/useAuth";
 import { trpc } from "@/lib/trpc";
@@ -11,6 +11,20 @@ import {
   calculateOverallScore,
   type SectionScore,
 } from "@shared/scoring";
+import {
+  deriveAssessmentFromAnswers,
+  type DerivedGap,
+  type DerivedSectionScore,
+} from "@shared/derivation";
+import { REQUIREMENT_CATALOG, REQUIREMENT_GUIDANCE } from "@shared/requirements";
+import type { AnswerValue } from "@shared/controls";
+
+/** The dealer's saved answer for a gap, phrased for the reader (grounded in the derived status). */
+function triggeringAnswerLabel(gap: DerivedGap): string {
+  if (gap.status === "partial") return "You answered: Partially in place";
+  if (gap.status === "not_implemented") return "You answered: No";
+  return "Not answered yet";
+}
 
 export default function Dashboard() {
   const [, setLocation] = useLocation();
@@ -25,8 +39,11 @@ export default function Dashboard() {
   const isLoadingScores = isAuthenticated && (answersQuery.isLoading || dealershipQuery.isLoading);
 
   const grouped: Record<number, Record<string, any>> = {};
+  const flatAnswers: Record<string, AnswerValue> = {};
   (answersQuery.data ?? []).forEach((row) => {
-    grouped[row.section] = (row.answers as Record<string, any>) ?? {};
+    const rowAnswers = (row.answers as Record<string, AnswerValue>) ?? {};
+    grouped[row.section] = rowAnswers;
+    Object.assign(flatAnswers, rowAnswers);
   });
 
   const sectionResults: SectionScore[] = SAFEGUARDS_SECTIONS.map((sec) => ({
@@ -34,6 +51,10 @@ export default function Dashboard() {
     section: sec.number,
     sectionName: sec.name,
   }));
+
+  // Explainability spine: same scores as sectionResults (proven equivalent in
+  // server/derivation.test.ts), but each gap carries its §314.4 citation + triggering answer.
+  const assessment = deriveAssessmentFromAnswers(REQUIREMENT_CATALOG, flatAnswers);
 
   const sectionScores: Record<number, number> = {};
   sectionResults.forEach((r) => {
@@ -55,7 +76,7 @@ export default function Dashboard() {
   ].filter(Boolean);
 
   // Owner priorities: worst sections first, critical gaps ahead of standard ones
-  const prioritySections = [...sectionResults]
+  const prioritySections: DerivedSectionScore[] = [...assessment.sections]
     .filter((r) => r.score < 80)
     .sort(
       (a, b) =>
@@ -111,6 +132,10 @@ export default function Dashboard() {
           <div className="flex gap-3">
             <Button variant="outline" onClick={() => setLocation("/profile")}>
               Dealership Profile
+            </Button>
+            <Button variant="outline" onClick={() => setLocation("/summary")}>
+              <FileText size={16} className="mr-2" aria-hidden="true" />
+              Risk Summary
             </Button>
             <Button onClick={() => setLocation("/wizard")} className="bg-amber-600 hover:bg-amber-500 text-slate-950">
               Continue Assessment
@@ -260,22 +285,54 @@ export default function Dashboard() {
                     <span className="text-sm text-slate-400">{100 - result.score}% gap</span>
                   </div>
                   <Progress value={result.score} className="h-1 mb-3" />
-                  <ul className="space-y-2">
+                  <ul className="space-y-3">
                     {(result.criticalGaps.length > 0 ? result.criticalGaps : result.gaps)
                       .slice(0, 3)
-                      .map((gap) => (
-                        <li key={gap} className="flex items-start gap-2 text-sm text-slate-300">
-                          <AlertTriangle
-                            className={
-                              result.criticalGaps.includes(gap)
-                                ? "text-red-500 flex-shrink-0 mt-0.5"
-                                : "text-yellow-500 flex-shrink-0 mt-0.5"
-                            }
-                            size={14}
-                          />
-                          <span>{gap}</span>
-                        </li>
-                      ))}
+                      .map((gap) => {
+                        const isCritical = result.criticalGaps.includes(gap);
+                        const guidance = REQUIREMENT_GUIDANCE[gap.requirementCode];
+                        return (
+                          <li
+                            key={gap.requirementCode}
+                            className="rounded-lg border border-slate-700 bg-slate-900/40 p-4"
+                          >
+                            <div className="flex items-start gap-2">
+                              <AlertTriangle
+                                className={
+                                  isCritical
+                                    ? "text-red-500 flex-shrink-0 mt-0.5"
+                                    : "text-yellow-500 flex-shrink-0 mt-0.5"
+                                }
+                                size={16}
+                                aria-hidden="true"
+                              />
+                              <div className="min-w-0 flex-1">
+                                <div className="flex flex-wrap items-center gap-2 mb-1">
+                                  <span className="font-medium text-slate-100">{gap.title}</span>
+                                  <span className="rounded bg-slate-700 px-2 py-0.5 text-xs font-mono text-slate-200">
+                                    {gap.citation}
+                                  </span>
+                                </div>
+                                <p className="text-xs font-medium text-amber-300 mb-2">
+                                  {triggeringAnswerLabel(gap)}
+                                </p>
+                                {guidance?.whyItMatters && (
+                                  <p className="text-sm text-slate-300 mb-1">
+                                    <span className="font-semibold text-slate-200">Why it matters: </span>
+                                    {guidance.whyItMatters}
+                                  </p>
+                                )}
+                                {guidance?.fix && (
+                                  <p className="text-sm text-slate-300">
+                                    <span className="font-semibold text-slate-200">The fix: </span>
+                                    {guidance.fix}
+                                  </p>
+                                )}
+                              </div>
+                            </div>
+                          </li>
+                        );
+                      })}
                   </ul>
                 </div>
               ))}

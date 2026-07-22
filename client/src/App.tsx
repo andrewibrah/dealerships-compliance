@@ -8,6 +8,7 @@ import Home from "./pages/Home";
 import Signup from "./pages/Signup";
 import Login from "./pages/Login";
 import Dashboard from "./pages/Dashboard";
+import Summary from "./pages/Summary";
 import Wizard from "./pages/Wizard";
 import Documents from "./pages/Documents";
 import Pricing from "./pages/Pricing";
@@ -23,6 +24,7 @@ function AppRouter() {
         <Route path={"/signup"} component={Signup} />
         <Route path={"/login"} component={Login} />
         <Route path={"/dashboard"} component={Dashboard} />
+        <Route path={"/summary"} component={Summary} />
         <Route path={"/profile"} component={Profile} />
         <Route path={"/wizard"} component={Wizard} />
         <Route path={"/documents"} component={Documents} />

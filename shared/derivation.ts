@@ -13,15 +13,15 @@
 // (only reachable via a manually-set Control) is excluded from the denominator and is not a
 // gap, which is the compliance-correct behavior and never perturbs the equivalence proof.
 
-import type { Requirement, RequirementWeight } from './requirements';
-import { deriveControlStatus, type AnswerValue, type ControlStatus } from './controls';
+import type { Requirement, RequirementWeight } from './requirements.ts';
+import { deriveControlStatus, type AnswerValue, type ControlStatus } from './controls.ts';
 import {
   CRITICAL_WEIGHT,
   IMPORTANT_WEIGHT,
   STANDARD_WEIGHT,
   HIGH_ENFORCEMENT_MULTIPLIER,
   HIGH_ENFORCEMENT_SECTIONS,
-} from './scoring';
+} from './scoring.ts';
 
 /** A derived Control status joined with its global Requirement row + the raw answer that set it. */
 export interface ControlWithRequirement {

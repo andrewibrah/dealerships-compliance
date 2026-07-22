@@ -1,6 +1,13 @@
 import { PDFDocument, PDFFont, PDFPage, StandardFonts, rgb, type RGB } from "pdf-lib";
 import { SAFEGUARDS_SECTIONS } from "./safeguards-questions.ts";
 import { calculateSectionScore, calculateOverallScore, type SectionScore } from "./scoring.ts";
+import {
+  deriveAssessmentFromAnswers,
+  type DerivedGap,
+  type DerivedSectionScore,
+} from "./derivation.ts";
+import { REQUIREMENT_CATALOG, REQUIREMENT_GUIDANCE } from "./requirements.ts";
+import type { AnswerValue } from "./controls.ts";
 
 /**
  * PDF generation for WISP and board report.
@@ -153,15 +160,53 @@ function wrapText(text: string, font: PDFFont, size: number, maxWidth: number): 
   return lines;
 }
 
-function remediationPriorities(results: SectionScore[]): { section: string; gap: string; critical: boolean }[] {
-  const items: { section: string; gap: string; critical: boolean; weight: number }[] = [];
-  for (const result of results) {
-    const enforcementBoost = [4, 5, 7].includes(result.section) ? 1 : 0;
-    for (const gap of result.criticalGaps) {
-      items.push({ section: result.sectionName, gap, critical: true, weight: 2 + enforcementBoost });
+/** Flatten per-section answer rows into one code -> value map for the derivation pass. */
+function flattenAnswers(rows: ComplianceAnswerRow[]): Record<string, AnswerValue> {
+  const flat: Record<string, AnswerValue> = {};
+  for (const row of rows) {
+    Object.assign(flat, (row.answers as Record<string, AnswerValue>) ?? {});
+  }
+  return flat;
+}
+
+/** The dealer's saved answer for a gap, phrased for the reader (grounded in the derived status). */
+function triggeringAnswerLabel(gap: DerivedGap): string {
+  if (gap.status === "partial") return "Current answer: Partially in place";
+  if (gap.status === "not_implemented") return "Current answer: No";
+  return "Not answered yet";
+}
+
+/** Write one gap as an explainable block: citation + triggering answer + why + fix. */
+function writeGapDetail(w: PdfWriter, gap: DerivedGap, critical: boolean) {
+  const guidance = REQUIREMENT_GUIDANCE[gap.requirementCode];
+  w.text(`• ${gap.title}  [${gap.citation}]`, {
+    indent: 12,
+    color: critical ? RED : rgb(0.1, 0.1, 0.1),
+  });
+  w.text(triggeringAnswerLabel(gap), { indent: 22, size: 9, color: SLATE });
+  if (guidance?.whyItMatters) {
+    w.text(`Why it matters: ${guidance.whyItMatters}`, { indent: 22, size: 9, color: SLATE });
+  }
+  if (guidance?.fix) {
+    w.text(`Fix: ${guidance.fix}`, { indent: 22, size: 9, color: SLATE, gapAfter: 6 });
+  }
+}
+
+interface RemediationItem {
+  sectionName: string;
+  gap: DerivedGap;
+  critical: boolean;
+}
+
+function remediationPriorities(sections: DerivedSectionScore[]): RemediationItem[] {
+  const items: (RemediationItem & { weight: number })[] = [];
+  for (const section of sections) {
+    const enforcementBoost = [4, 5, 7].includes(section.section) ? 1 : 0;
+    for (const gap of section.criticalGaps) {
+      items.push({ sectionName: section.sectionName, gap, critical: true, weight: 2 + enforcementBoost });
     }
-    for (const gap of result.gaps.filter((g) => !result.criticalGaps.includes(g))) {
-      items.push({ section: result.sectionName, gap, critical: false, weight: enforcementBoost });
+    for (const gap of section.gaps.filter((g) => !section.criticalGaps.includes(g))) {
+      items.push({ sectionName: section.sectionName, gap, critical: false, weight: enforcementBoost });
     }
   }
   return items.sort((a, b) => b.weight - a.weight).slice(0, 10);
@@ -176,6 +221,10 @@ export async function generateWISP(
 ): Promise<Uint8Array> {
   const results = computeSectionResults(complianceAnswers);
   const overall = calculateOverallScore(results);
+  // Explainability spine: same numbers as `results` (proven equivalent in
+  // server/derivation.test.ts), but each gap carries its §314.4 citation + triggering answer.
+  const assessment = deriveAssessmentFromAnswers(REQUIREMENT_CATALOG, flattenAnswers(complianceAnswers));
+  const derivedBySection = new Map(assessment.sections.map((s) => [s.section, s]));
   const w = await PdfWriter.create();
 
   w.text("WRITTEN INFORMATION SECURITY PROGRAM (WISP)", { size: 17, bold: true, color: NAVY });
@@ -224,32 +273,38 @@ export async function generateWISP(
       w.text("No safeguards in this element are confirmed in place yet.", { color: SLATE });
     }
 
-    if (result.criticalGaps.length > 0) {
+    const derived = derivedBySection.get(sec.number);
+    const criticalGaps = derived?.criticalGaps ?? [];
+    const otherGaps = derived
+      ? derived.gaps.filter((g) => !derived.criticalGaps.includes(g))
+      : [];
+    if (criticalGaps.length > 0) {
       w.text("Open critical items:", { bold: true, color: RED });
-      for (const gap of result.criticalGaps) {
-        w.text(`• ${gap}`, { indent: 12 });
+      for (const gap of criticalGaps) {
+        writeGapDetail(w, gap, true);
       }
     }
-    const otherGaps = result.gaps.filter((g) => !result.criticalGaps.includes(g));
     if (otherGaps.length > 0) {
       w.text("Other open items:", { bold: true, color: SLATE });
       for (const gap of otherGaps) {
-        w.text(`• ${gap}`, { indent: 12 });
+        writeGapDetail(w, gap, false);
       }
     }
     w.spacer(4);
   }
 
   w.heading("Remediation Priorities");
-  const priorities = remediationPriorities(results);
+  const priorities = remediationPriorities(assessment.sections);
   if (priorities.length === 0) {
     w.text("No open remediation items. Maintain current controls and reassess quarterly.");
   } else {
     priorities.forEach((item, i) => {
       w.text(
-        `${i + 1}. [${item.critical ? "CRITICAL" : "Recommended"}] ${item.section}: ${item.gap}`,
+        `${i + 1}. [${item.critical ? "CRITICAL" : "Recommended"}] ${item.sectionName}: ${item.gap.title} [${item.gap.citation}]`,
         { color: item.critical ? RED : rgb(0.1, 0.1, 0.1) }
       );
+      const fix = REQUIREMENT_GUIDANCE[item.gap.requirementCode]?.fix;
+      if (fix) w.text(`Fix: ${fix}`, { indent: 16, size: 9, color: SLATE });
     });
   }
 
@@ -277,6 +332,7 @@ export async function generateBoardReport(
 ): Promise<Uint8Array> {
   const results = computeSectionResults(complianceAnswers);
   const overall = calculateOverallScore(results);
+  const assessment = deriveAssessmentFromAnswers(REQUIREMENT_CATALOG, flattenAnswers(complianceAnswers));
   const w = await PdfWriter.create();
 
   w.text("ANNUAL COMPLIANCE REPORT", { size: 17, bold: true, color: NAVY });
@@ -317,27 +373,29 @@ export async function generateBoardReport(
   }
 
   w.heading("Key Findings");
-  const critical = results.filter((r) => r.criticalGaps.length > 0);
-  if (critical.length === 0) {
+  const criticalSections = assessment.sections.filter((s) => s.criticalGaps.length > 0);
+  if (criticalSections.length === 0) {
     w.text("No critical gaps identified in the current assessment.");
   } else {
-    for (const result of critical) {
-      w.text(`${result.sectionName} (${result.score}%):`, { bold: true, color: RED });
-      for (const gap of result.criticalGaps) {
-        w.text(`• ${gap}`, { indent: 12 });
+    for (const section of criticalSections) {
+      w.text(`${section.sectionName} (${section.score}%):`, { bold: true, color: RED });
+      for (const gap of section.criticalGaps) {
+        writeGapDetail(w, gap, true);
       }
     }
   }
 
   w.heading("Recommended Actions (next 90 days)");
-  const priorities = remediationPriorities(results).slice(0, 5);
+  const priorities = remediationPriorities(assessment.sections).slice(0, 5);
   if (priorities.length === 0) {
     w.text("1. Maintain current security posture and reassess quarterly.");
     w.text("2. Confirm annual QI report to the board is on the calendar.");
     w.text("3. Monitor regulatory changes to 16 CFR Part 314.");
   } else {
     priorities.forEach((item, i) => {
-      w.text(`${i + 1}. ${item.section}: ${item.gap}`);
+      w.text(`${i + 1}. ${item.sectionName}: ${item.gap.title} [${item.gap.citation}]`);
+      const fix = REQUIREMENT_GUIDANCE[item.gap.requirementCode]?.fix;
+      if (fix) w.text(`Fix: ${fix}`, { indent: 16, size: 9, color: SLATE });
     });
   }
 

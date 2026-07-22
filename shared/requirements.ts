@@ -12,7 +12,7 @@
 // text (see CITATION_BY_CODE). Where a question does not warrant anything finer than its
 // section's element, it keeps the section-level citation (CITATION_BY_SECTION).
 
-import { SAFEGUARDS_SECTIONS } from './safeguards-questions';
+import { SAFEGUARDS_SECTIONS } from './safeguards-questions.ts';
 
 export type RequirementWeight = 'critical' | 'important' | 'standard';
 
