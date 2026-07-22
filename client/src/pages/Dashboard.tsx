@@ -1,7 +1,7 @@
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { Progress } from "@/components/ui/progress";
-import { AlertTriangle, CheckCircle2, AlertCircle, TrendingUp, Loader2, FileText } from "lucide-react";
+import { AlertTriangle, CheckCircle2, AlertCircle, TrendingUp, Loader2, FileText, ListChecks } from "lucide-react";
 import { useLocation } from "wouter";
 import { useAuth } from "@/hooks/useAuth";
 import { trpc } from "@/lib/trpc";
@@ -36,7 +36,16 @@ export default function Dashboard() {
   const dealershipQuery = trpc.dealership.getCurrent.useQuery(undefined, {
     enabled: isAuthenticated,
   });
+  const tasksQuery = trpc.tasks.list.useQuery(undefined, {
+    enabled: isAuthenticated,
+  });
   const isLoadingScores = isAuthenticated && (answersQuery.isLoading || dealershipQuery.isLoading);
+
+  // Open remediation tasks = anything not resolved (PRD #38 dashboard surfacing). Additive:
+  // never blocks the score render — defaults to 0 until tasks.list resolves.
+  const openTaskCount = (tasksQuery.data ?? []).filter(
+    (t) => t.status !== "done" && t.status !== "cancelled"
+  ).length;
 
   const grouped: Record<number, Record<string, any>> = {};
   const flatAnswers: Record<string, AnswerValue> = {};
@@ -204,13 +213,30 @@ export default function Dashboard() {
 
             <div>
               <h3 className="text-sm font-semibold text-slate-300 mb-4">Next Steps</h3>
-              <Button
-                size="sm"
-                onClick={() => setLocation("/documents")}
-                className="bg-amber-600 hover:bg-amber-500 text-slate-950 w-full"
-              >
-                Generate Documents
-              </Button>
+              <div className="mb-3 flex items-baseline gap-2">
+                <span className="text-3xl font-bold text-white">{openTaskCount}</span>
+                <span className="text-sm text-slate-400">
+                  open remediation task{openTaskCount === 1 ? "" : "s"}
+                </span>
+              </div>
+              <div className="flex flex-col gap-2">
+                <Button
+                  size="sm"
+                  onClick={() => setLocation("/documents")}
+                  className="bg-amber-600 hover:bg-amber-500 text-slate-950 w-full"
+                >
+                  Generate Documents
+                </Button>
+                <Button
+                  size="sm"
+                  variant="outline"
+                  onClick={() => setLocation("/tasks")}
+                  className="w-full"
+                >
+                  <ListChecks size={16} className="mr-2" aria-hidden="true" />
+                  View Tasks
+                </Button>
+              </div>
             </div>
           </div>
         </Card>

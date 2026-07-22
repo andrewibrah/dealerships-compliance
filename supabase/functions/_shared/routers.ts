@@ -9,6 +9,7 @@ import { router, publicProcedure, protectedProcedure } from './trpc.ts';
 import { resolveTenantScope, type TenantScope } from '../../../shared/tenant-guard.ts';
 import { AUDIT_ACTIONS } from '../../../shared/audit.ts';
 import { deriveControlStatus, type AnswerValue } from '../../../shared/controls.ts';
+import { deriveTasksFromControls } from '../../../shared/task-derivation.ts';
 
 // JSONB -> Control cutover (PRD #5). Additively project a saved section's answers onto derived
 // Control rows — one per answered requirement present in the GLOBAL catalog. Runs AFTER the
@@ -462,6 +463,33 @@ const tasksRouter = router({
       });
       return task;
     }),
+  // Remediation roadmap (PRD #24/#40): project OPEN controls onto suggested tasks. Pure,
+  // deterministic (deriveTasksFromControls — no LLM) and idempotent (skips controls that
+  // already have a task), so this is safe to re-run. Every created task is audited.
+  deriveFromControls: protectedProcedure.mutation(async ({ ctx }) => {
+    const scope = await resolveTenantScope(db, ctx.user.id, { createIfMissing: true });
+    if (!scope) throw new Error('Unable to resolve dealership');
+    const [controls, requirements, existingTasks] = await Promise.all([
+      db.listControls(scope),
+      db.listRequirements(),
+      db.listTasks(scope),
+    ]);
+    const derived = deriveTasksFromControls({ controls, requirements, existingTasks });
+    const created = [];
+    for (const input of derived) {
+      const task = await db.createTask(scope, input);
+      await db.appendAuditLog({
+        action: AUDIT_ACTIONS.taskCreate,
+        actor: { userId: ctx.user.id, email: ctx.user.email },
+        entityType: 'task',
+        entityId: task.id,
+        dealershipId: scope.dealershipId,
+        metadata: { title: task.title, priority: task.priority, source: 'derive', controlId: input.controlId },
+      });
+      created.push(task);
+    }
+    return created;
+  }),
 });
 
 // Policies — written policies/procedures (tenant-scoped, PRD #22/#26).

@@ -5,6 +5,7 @@ import * as db from './db';
 import { resolveTenantScope, type TenantScope } from '@shared/tenant-guard';
 import { AUDIT_ACTIONS } from '@shared/audit';
 import { deriveControlStatus, type AnswerValue } from '@shared/controls';
+import { deriveTasksFromControls } from '@shared/task-derivation';
 import { storageGetSignedUrl, evidenceGetSignedUrl } from './storage';
 import { pdfRouter } from './pdf-router';
 import { stripeRouter } from './stripe-router';
@@ -510,6 +511,34 @@ export const appRouter = router({
         });
         return task;
       }),
+
+    // Remediation roadmap (PRD #24/#40): project OPEN controls onto suggested tasks. Pure,
+    // deterministic (deriveTasksFromControls — no LLM) and idempotent (skips controls that
+    // already have a task), so this is safe to re-run. Every created task is audited.
+    deriveFromControls: protectedProcedure.mutation(async ({ ctx }) => {
+      const scope = await resolveTenantScope(db, ctx.user.id, { createIfMissing: true });
+      if (!scope) throw new Error('Unable to resolve dealership');
+      const [controls, requirements, existingTasks] = await Promise.all([
+        db.listControls(scope),
+        db.listRequirements(),
+        db.listTasks(scope),
+      ]);
+      const derived = deriveTasksFromControls({ controls, requirements, existingTasks });
+      const created = [];
+      for (const input of derived) {
+        const task = await db.createTask(scope, input);
+        await db.appendAuditLog({
+          action: AUDIT_ACTIONS.taskCreate,
+          actor: { userId: ctx.user.id, email: ctx.user.email },
+          entityType: 'task',
+          entityId: task.id,
+          dealershipId: scope.dealershipId,
+          metadata: { title: task.title, priority: task.priority, source: 'derive', controlId: input.controlId },
+        });
+        created.push(task);
+      }
+      return created;
+    }),
   }),
 
   // Policies — written policies/procedures (tenant-scoped, PRD #22/#26).

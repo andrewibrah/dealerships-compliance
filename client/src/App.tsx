@@ -11,6 +11,7 @@ import Dashboard from "./pages/Dashboard";
 import Summary from "./pages/Summary";
 import Wizard from "./pages/Wizard";
 import Documents from "./pages/Documents";
+import Tasks from "./pages/Tasks";
 import Pricing from "./pages/Pricing";
 import Profile from "./pages/Profile";
 
@@ -28,6 +29,7 @@ function AppRouter() {
         <Route path={"/profile"} component={Profile} />
         <Route path={"/wizard"} component={Wizard} />
         <Route path={"/documents"} component={Documents} />
+        <Route path={"/tasks"} component={Tasks} />
         <Route path={"/pricing"} component={Pricing} />
         <Route path={"/404"} component={NotFound} />
         <Route component={NotFound} />
