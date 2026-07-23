@@ -4,12 +4,15 @@ import {
   generateBoardReport,
   generateSecurityArchitectureAssessment,
   generateRiskAssessment,
+  generateIncidentResponsePlan,
+  generatePolicy,
   computeOverallScore,
   type DealershipInfo,
   type ComplianceAnswerRow,
   type ArchitectureEntities,
 } from "../shared/pdf-generator";
 import { SAFEGUARDS_SECTIONS } from "../shared/safeguards-questions";
+import { POLICY_TYPES } from "../shared/policy-templates";
 
 const dealership: DealershipInfo = {
   name: "Test Motors",
@@ -113,5 +116,29 @@ describe("Written Risk Assessment PDF", () => {
     );
     expect(bytes.length).toBeGreaterThan(1000);
     expect(String.fromCharCode(...bytes.slice(0, 5))).toBe("%PDF-");
+  });
+});
+
+describe("Incident Response Plan PDF", () => {
+  it("generates a PDF with no answers saved", async () => {
+    const bytes = await generateIncidentResponsePlan(dealership, []);
+    expect(bytes.length).toBeGreaterThan(1000);
+    expect(String.fromCharCode(...bytes.slice(0, 5))).toBe("%PDF-");
+  });
+
+  it("generates a PDF from real section-7 answers", async () => {
+    const bytes = await generateIncidentResponsePlan(dealership, answersForAllSections("no"));
+    expect(bytes.length).toBeGreaterThan(1000);
+    expect(String.fromCharCode(...bytes.slice(0, 5))).toBe("%PDF-");
+  });
+});
+
+describe("Written policy PDFs", () => {
+  it("generates each policy type without throwing", async () => {
+    for (const policyType of POLICY_TYPES) {
+      const bytes = await generatePolicy(dealership, answersForAllSections("no"), { policyType });
+      expect(bytes.length).toBeGreaterThan(1000);
+      expect(String.fromCharCode(...bytes.slice(0, 5))).toBe("%PDF-");
+    }
   });
 });

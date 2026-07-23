@@ -1,20 +1,29 @@
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { AlertCircle, Download, FileText, Lock } from "lucide-react";
+import { useState } from "react";
 import { useLocation } from "wouter";
 import { useAuth } from "@/hooks/useAuth";
 import { trpc } from "@/lib/trpc";
 import { toast } from "sonner";
+import { POLICY_DEFINITIONS, POLICY_TYPES, type PolicyType } from "@shared/policy-templates";
 
 const DOC_TYPE_LABELS: Record<string, string> = {
   wisp: "WISP Document",
   board_report: "Board Report",
   security_architecture: "Security Architecture Assessment",
   risk_assessment: "Written Risk Assessment",
+  incident_response_plan: "Incident Response Plan",
+  policy_access_control: "Access Control Policy",
+  policy_encryption: "Encryption Policy",
+  policy_mfa: "Multi-Factor Authentication Policy",
+  policy_disposal: "Data Retention & Secure Disposal Policy",
+  policy_change_management: "Change Management Policy",
 };
 
 export default function Documents() {
   const [, setLocation] = useLocation();
+  const [policyType, setPolicyType] = useState<PolicyType>("access_control");
   const { user, isAuthenticated, loading } = useAuth();
 
   const subscriptionQuery = trpc.stripe.getSubscriptionStatus.useQuery(undefined, {
@@ -57,11 +66,21 @@ export default function Documents() {
     onSuccess: (res) => onGenerated(res.url, "Written Risk Assessment"),
     onError: (e) => onGenerateError(e.message),
   });
+  const generateIRP = trpc.pdf.generateIncidentResponsePlan.useMutation({
+    onSuccess: (res) => onGenerated(res.url, "Incident Response Plan"),
+    onError: (e) => onGenerateError(e.message),
+  });
+  const generatePolicy = trpc.pdf.generatePolicy.useMutation({
+    onSuccess: (res) => onGenerated(res.url, POLICY_DEFINITIONS[policyType].title),
+    onError: (e) => onGenerateError(e.message),
+  });
   const isGenerating =
     generateWISP.isPending ||
     generateBoardReport.isPending ||
     generateArchitecture.isPending ||
-    generateRiskAssessment.isPending;
+    generateRiskAssessment.isPending ||
+    generateIRP.isPending ||
+    generatePolicy.isPending;
 
   if (loading || (isAuthenticated && (subscriptionQuery.isLoading || dealershipQuery.isLoading))) {
     return (
@@ -106,6 +125,22 @@ export default function Documents() {
       return;
     }
     generateRiskAssessment.mutate();
+  };
+
+  const handleGenerateIRP = () => {
+    if (!hasSubscription) {
+      setLocation("/pricing");
+      return;
+    }
+    generateIRP.mutate();
+  };
+
+  const handleGeneratePolicy = () => {
+    if (!hasSubscription) {
+      setLocation("/pricing");
+      return;
+    }
+    generatePolicy.mutate({ policyType });
   };
 
   const documents = documentsQuery.data ?? [];
@@ -333,6 +368,104 @@ export default function Documents() {
                 ? "Generating..."
                 : hasSubscription
                   ? "Generate Risk Assessment"
+                  : "Upgrade to generate"}
+            </Button>
+          </Card>
+
+          {/* Incident Response Plan */}
+          <Card className="bg-slate-800 border-slate-700 p-8 flex flex-col">
+            <div className="flex items-center gap-3 mb-4">
+              <FileText className="text-orange-500" size={28} aria-hidden="true" />
+              <h2 className="text-2xl font-bold text-white">Incident Response Plan</h2>
+            </div>
+
+            <p className="text-slate-300 mb-6 flex-1">
+              The FTC-required written Incident Response Plan (§314.4(h)) — all seven required elements, the
+              §314.4(j) FTC breach-notification timeline, and your incident-response readiness grounded in your
+              saved answers, with the Response Lead named from your Qualified Individual.
+            </p>
+
+            <div className="space-y-3 mb-6">
+              <div className="flex items-center gap-2 text-sm text-slate-400">
+                <span className="text-green-500">✓</span>
+                <span>All seven §314.4(h) elements covered</span>
+              </div>
+              <div className="flex items-center gap-2 text-sm text-slate-400">
+                <span className="text-green-500">✓</span>
+                <span>FTC 30-day / 500-consumer breach-notice rule</span>
+              </div>
+              <div className="flex items-center gap-2 text-sm text-slate-400">
+                <span className="text-green-500">✓</span>
+                <span>Honest readiness with each gap's §314.4 citation</span>
+              </div>
+            </div>
+
+            <Button
+              onClick={handleGenerateIRP}
+              disabled={isGenerating}
+              className="w-full bg-amber-600 hover:bg-amber-500 text-slate-950"
+            >
+              {generateIRP.isPending
+                ? "Generating..."
+                : hasSubscription
+                  ? "Generate Incident Response Plan"
+                  : "Upgrade to generate"}
+            </Button>
+          </Card>
+
+          {/* Written Policies */}
+          <Card className="bg-slate-800 border-slate-700 p-8 flex flex-col">
+            <div className="flex items-center gap-3 mb-4">
+              <FileText className="text-rose-500" size={28} aria-hidden="true" />
+              <h2 className="text-2xl font-bold text-white">Written Policies</h2>
+            </div>
+
+            <p className="text-slate-300 mb-6 flex-1">
+              Generate a Rule-mandated written policy — access control, encryption, MFA, data retention &amp;
+              disposal, or change management — as a draft citing its §314.4(c) subsection and reflecting your
+              honest posture from your saved answers. Saved as a draft for review and formal adoption.
+            </p>
+
+            <div className="space-y-3 mb-6">
+              <div className="flex items-center gap-2 text-sm text-slate-400">
+                <span className="text-green-500">✓</span>
+                <span>Five §314.4(c) policies to choose from</span>
+              </div>
+              <div className="flex items-center gap-2 text-sm text-slate-400">
+                <span className="text-green-500">✓</span>
+                <span>Grounded posture — never a false "implemented" claim</span>
+              </div>
+              <div className="flex items-center gap-2 text-sm text-slate-400">
+                <span className="text-green-500">✓</span>
+                <span>Draft policy saved alongside the PDF</span>
+              </div>
+            </div>
+
+            <label htmlFor="policyType" className="text-sm text-slate-300 mb-2">
+              Policy type
+            </label>
+            <select
+              id="policyType"
+              value={policyType}
+              onChange={(e) => setPolicyType(e.target.value as PolicyType)}
+              className="mb-4 w-full rounded-md border border-slate-700 bg-slate-900 px-3 py-2 text-white"
+            >
+              {POLICY_TYPES.map((t) => (
+                <option key={t} value={t}>
+                  {POLICY_DEFINITIONS[t].title}
+                </option>
+              ))}
+            </select>
+
+            <Button
+              onClick={handleGeneratePolicy}
+              disabled={isGenerating}
+              className="w-full bg-amber-600 hover:bg-amber-500 text-slate-950"
+            >
+              {generatePolicy.isPending
+                ? "Generating..."
+                : hasSubscription
+                  ? "Generate Policy"
                   : "Upgrade to generate"}
             </Button>
           </Card>

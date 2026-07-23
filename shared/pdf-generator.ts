@@ -21,6 +21,13 @@ import {
   ASSESSMENT_DISCLAIMER,
   type DomainKey,
 } from "./security-architecture.ts";
+import { buildIncidentResponsePlan, BREACH_NOTICE_CITATION } from "./incident-response.ts";
+import {
+  POLICY_DEFINITIONS,
+  buildPolicyPosture,
+  policyAnswerLabel,
+  type PolicyType,
+} from "./policy-templates.ts";
 
 /**
  * PDF generation for WISP and board report.
@@ -804,6 +811,187 @@ export async function generateRiskAssessment(
       "material change to operations, systems, vendors, or after any security event (§314.4(b)(2)).",
     { size: 9, color: SLATE, gapAfter: 6 },
   );
+
+  writeDisclaimer(w);
+  w.text("Confidential — for internal, board, auditor, and regulator use.", { size: 8, color: SLATE });
+  w.text(`Generated ${new Date().toLocaleString()}`, { size: 8, color: SLATE });
+
+  return w.save();
+}
+
+// --- Phase 2 #23: Incident Response Plan + #22: written §314.4(c) policies -------------------
+//
+// Both reuse PdfWriter / writeGapDetail / writeCoveredEntity / writeDisclaimer, embed
+// ASSESSMENT_DISCLAIMER (P0), and pull their content from the deterministic models in
+// shared/incident-response.ts and shared/policy-templates.ts. Every element/clause is authored,
+// grounded content; every status/citation/gap traces to a saved answer or the Rule. Where a
+// control is a gap the document states the requirement + the honest current posture, never a
+// false "we have implemented X". No LLM sits in this path.
+
+/**
+ * Incident Response Plan (§314.4(h) / PRD #23). Covers the seven required elements of §314.4(h),
+ * states the §314.4(j) FTC breach-notification timeline, grounds the Incident Response Lead in the
+ * dealership's Qualified Individual, and reports honest section-7 readiness with each open item's
+ * §314.4 citation + triggering answer.
+ */
+export async function generateIncidentResponsePlan(
+  dealership: DealershipInfo,
+  complianceAnswers: ComplianceAnswerRow[],
+): Promise<Uint8Array> {
+  const plan = buildIncidentResponsePlan(dealership, flattenAnswers(complianceAnswers));
+  const w = await PdfWriter.create();
+
+  w.text("INCIDENT RESPONSE PLAN", { size: 17, bold: true, color: NAVY });
+  w.text("FTC Safeguards Rule §314.4(h) — 16 CFR Part 314", { size: 11, color: SLATE, gapAfter: 10 });
+  writeDisclaimer(w);
+
+  writeCoveredEntity(w, dealership);
+
+  w.heading("Purpose & Authority");
+  w.text(
+    "16 CFR §314.4(h) requires a written incident response plan for promptly responding to, and " +
+      "recovering from, any security event materially affecting the confidentiality, integrity, or " +
+      "availability of customer information. This document is that plan, and it addresses each of the " +
+      "seven elements the Rule requires.",
+    { color: SLATE, gapAfter: 4 },
+  );
+  if (plan.isExempt) {
+    w.text(
+      "Your dealership may qualify for the §314.6(a) small-institution exemption (fewer than 5,000 " +
+        "consumers), under which §314.4(h) does not strictly apply. Maintaining this plan remains strong " +
+        "practice and is recommended.",
+      { size: 9, color: AMBER, gapAfter: 4 },
+    );
+  }
+
+  for (const element of plan.elements) {
+    w.heading(`${element.title}  [${element.citation}]`, 12);
+    for (const paragraph of element.paragraphs) {
+      w.text(paragraph, { color: rgb(0.1, 0.1, 0.1) });
+    }
+    w.spacer(2);
+  }
+
+  w.heading(`Regulatory Breach-Notification Timeline (${BREACH_NOTICE_CITATION})`);
+  for (const paragraph of plan.breachNotice) {
+    w.text(paragraph, { color: rgb(0.1, 0.1, 0.1) });
+  }
+  w.spacer(2);
+
+  w.heading("Current Readiness (§314.4(h))");
+  w.text(`Incident-response element score: ${plan.readiness.score}%`, {
+    bold: true,
+    color: riskColor(plan.readiness.score),
+  });
+  if (plan.readiness.confirmed.length > 0) {
+    w.text(
+      `${plan.readiness.confirmed.length} of the incident-response safeguards are confirmed in place:`,
+      { size: 9, color: SLATE },
+    );
+    for (const control of plan.readiness.confirmed) {
+      w.text(`• ${control.requirement.title} [${control.requirement.citation}] — Current answer: Yes`, {
+        indent: 12,
+        size: 9,
+        color: SLATE,
+      });
+    }
+  }
+  if (plan.readiness.criticalGaps.length > 0) {
+    w.text("Open critical items:", { bold: true, color: RED });
+    for (const gap of plan.readiness.criticalGaps) writeGapDetail(w, gap, true);
+  }
+  const otherGaps = plan.readiness.gaps.filter((g) => !plan.readiness.criticalGaps.includes(g));
+  if (otherGaps.length > 0) {
+    w.text("Other open items:", { bold: true, color: SLATE });
+    for (const gap of otherGaps) writeGapDetail(w, gap, false);
+  }
+  if (plan.readiness.gaps.length === 0 && plan.readiness.confirmed.length === 0) {
+    w.text("No incident-response answers have been saved yet.", { color: SLATE });
+  }
+  w.spacer(6);
+
+  writeDisclaimer(w);
+  w.text("Confidential — for internal, board, auditor, and regulator use.", { size: 8, color: SLATE });
+  w.text(`Generated ${new Date().toLocaleString()}`, { size: 8, color: SLATE });
+
+  return w.save();
+}
+
+/**
+ * Written policy generator (§314.4(c) / PRD #22). One parameterized generator over
+ * POLICY_DEFINITIONS: renders the policy's authored clauses citing the §314.4(c) subsection it
+ * fulfills, then a "current posture" block grounded honestly in the dealer's saved answers to the
+ * related controls (each with its own §314.4 citation + triggering answer). Never claims a control
+ * is in place when the answer says otherwise.
+ */
+export async function generatePolicy(
+  dealership: DealershipInfo,
+  complianceAnswers: ComplianceAnswerRow[],
+  opts: { policyType: PolicyType },
+): Promise<Uint8Array> {
+  const def = POLICY_DEFINITIONS[opts.policyType];
+  const posture = buildPolicyPosture(def, flattenAnswers(complianceAnswers));
+  const w = await PdfWriter.create();
+
+  w.text(def.title.toUpperCase(), { size: 17, bold: true, color: NAVY });
+  w.text(`FTC Safeguards Rule ${def.citation} — 16 CFR Part 314`, { size: 11, color: SLATE, gapAfter: 10 });
+  writeDisclaimer(w);
+
+  writeCoveredEntity(w, dealership);
+
+  w.heading("Status");
+  w.text(
+    "DRAFT — this policy was generated from your saved answers. Review it with counsel and formally " +
+      "adopt it before relying on it.",
+    { color: SLATE, gapAfter: 6 },
+  );
+
+  w.heading("Purpose");
+  w.text(def.purpose, { color: SLATE, gapAfter: 4 });
+  w.text(`This policy implements the safeguard required by 16 CFR ${def.citation}.`, {
+    size: 9,
+    color: SLATE,
+    gapAfter: 4,
+  });
+
+  w.heading("Policy Statements");
+  def.clauses.forEach((clause, i) => {
+    w.text(`${i + 1}. ${clause.heading}`, { bold: true });
+    w.text(clause.body, { indent: 12, color: rgb(0.1, 0.1, 0.1), gapAfter: 4 });
+  });
+
+  w.heading(`Current Posture (${def.citation})`);
+  if (posture.confirmed.length === 0 && posture.gaps.length === 0) {
+    w.text("No related self-assessment answers were found for this control area.", { color: SLATE });
+  } else {
+    if (posture.confirmed.length > 0) {
+      w.text("Confirmed in place:", { bold: true, color: GREEN });
+      for (const item of posture.confirmed) {
+        w.text(`• ${item.requirement.title} [${item.requirement.citation}] — Current answer: Yes`, {
+          indent: 12,
+          size: 9,
+          color: SLATE,
+        });
+      }
+    }
+    if (posture.gaps.length > 0) {
+      w.text("Required — not yet confirmed in place:", { bold: true, color: RED });
+      for (const item of posture.gaps) {
+        w.text(`• ${item.requirement.title} [${item.requirement.citation}]`, {
+          indent: 12,
+          size: 9,
+          color: rgb(0.1, 0.1, 0.1),
+        });
+        w.text(policyAnswerLabel(item.status), { indent: 22, size: 9, color: SLATE });
+      }
+      w.text(
+        "These controls are required by the Safeguards Rule but are not yet confirmed in place. Adopting " +
+          "this policy is the first step; implement and evidence each item to close the gap.",
+        { size: 9, color: SLATE, gapAfter: 4 },
+      );
+    }
+  }
+  w.spacer(6);
 
   writeDisclaimer(w);
   w.text("Confidential — for internal, board, auditor, and regulator use.", { size: 8, color: SLATE });

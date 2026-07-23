@@ -7,8 +7,16 @@ import {
   generateBoardReport,
   generateSecurityArchitectureAssessment,
   generateRiskAssessment,
+  generateIncidentResponsePlan,
+  generatePolicy,
 } from "@shared/pdf-generator";
 import { buildSecurityArchitectureAssessment, type DomainKey } from "@shared/security-architecture";
+import {
+  POLICY_DEFINITIONS,
+  POLICY_TYPES,
+  renderPolicyText,
+  type PolicyType,
+} from "@shared/policy-templates";
 import { narrateDomain } from "@shared/architecture-narrative";
 import { AUDIT_ACTIONS } from "@shared/audit";
 import type { AnswerValue } from "@shared/controls";
@@ -179,6 +187,90 @@ export const pdfRouter = router({
 
     return { url, success: true };
   }),
+
+  // Generate Incident Response Plan PDF (§314.4(h) / PRD #23) — paid-gated + audited.
+  generateIncidentResponsePlan: protectedProcedure.mutation(async ({ ctx }) => {
+    const scope = await requirePaidScope(ctx.user.id);
+    const answers = await db.getAllComplianceAnswers(scope);
+
+    const pdfBytes = await generateIncidentResponsePlan(scope.dealership, answers);
+
+    const fileName = `incident-response-plan-${scope.dealershipId}-${Date.now()}.pdf`;
+    const { url } = await storagePut(fileName, pdfBytes, "application/pdf");
+
+    await db.saveGeneratedDocument(scope, {
+      docType: "incident_response_plan",
+      storagePath: fileName,
+    });
+    await db.appendAuditLog({
+      action: AUDIT_ACTIONS.documentGenerate,
+      actor: { userId: ctx.user.id, email: ctx.user.email },
+      entityType: "generated_document",
+      dealershipId: scope.dealershipId,
+      metadata: { docType: "incident_response_plan" },
+    });
+
+    return { url, success: true };
+  }),
+
+  // Generate a written §314.4(c) policy PDF (PRD #22) — creates a draft `policies` row AND the
+  // PDF, both audited. Paid-gated. The policy content + PDF are grounded in the dealer's answers.
+  generatePolicy: protectedProcedure
+    .input(z.object({ policyType: z.enum(POLICY_TYPES as [PolicyType, ...PolicyType[]]) }))
+    .mutation(async ({ ctx, input }) => {
+      const scope = await requirePaidScope(ctx.user.id);
+      const def = POLICY_DEFINITIONS[input.policyType];
+      const answers = await db.getAllComplianceAnswers(scope);
+
+      // Link the policies row to its global requirement, when the (c) subsection maps to a
+      // questionnaire control (change management, §314.4(c)(7), has none -> null).
+      let requirementId: number | null = null;
+      if (def.primaryCode) {
+        const catalog = await db.listRequirements();
+        requirementId = catalog.find((r) => r.code === def.primaryCode)?.id ?? null;
+      }
+      const content = renderPolicyText(def, scope.dealership, flattenAnswers(answers));
+
+      const pdfBytes = await generatePolicy(scope.dealership, answers, {
+        policyType: input.policyType,
+      });
+      const fileName = `${def.docType}-${scope.dealershipId}-${Date.now()}.pdf`;
+      const { url } = await storagePut(fileName, pdfBytes, "application/pdf");
+
+      const policy = await db.createPolicy(scope, {
+        policyType: input.policyType,
+        title: def.title,
+        status: "draft",
+        version: 1,
+        content,
+        storagePath: fileName,
+        requirementId,
+        approvedBy: "",
+        adoptedAt: null,
+      });
+      await db.appendAuditLog({
+        action: AUDIT_ACTIONS.policyCreate,
+        actor: { userId: ctx.user.id, email: ctx.user.email },
+        entityType: "policy",
+        entityId: policy.id,
+        dealershipId: scope.dealershipId,
+        metadata: { policyType: input.policyType, title: def.title, status: "draft", source: "generate" },
+      });
+
+      await db.saveGeneratedDocument(scope, {
+        docType: def.docType,
+        storagePath: fileName,
+      });
+      await db.appendAuditLog({
+        action: AUDIT_ACTIONS.documentGenerate,
+        actor: { userId: ctx.user.id, email: ctx.user.email },
+        entityType: "generated_document",
+        dealershipId: scope.dealershipId,
+        metadata: { docType: def.docType, policyType: input.policyType, policyId: policy.id },
+      });
+
+      return { url, success: true, policyId: policy.id };
+    }),
 
   // Get a fresh download URL for the most recent document of a type
   getDocumentUrl: protectedProcedure
