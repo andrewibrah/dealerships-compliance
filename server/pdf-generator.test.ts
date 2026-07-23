@@ -2,9 +2,12 @@ import { describe, it, expect } from "vitest";
 import {
   generateWISP,
   generateBoardReport,
+  generateSecurityArchitectureAssessment,
+  generateRiskAssessment,
   computeOverallScore,
   type DealershipInfo,
   type ComplianceAnswerRow,
+  type ArchitectureEntities,
 } from "../shared/pdf-generator";
 import { SAFEGUARDS_SECTIONS } from "../shared/safeguards-questions";
 
@@ -47,5 +50,68 @@ describe("PDF generation", () => {
     expect(computeOverallScore(answersForAllSections("yes"))).toBe(100);
     expect(computeOverallScore(answersForAllSections("no"))).toBe(0);
     expect(computeOverallScore([])).toBe(0);
+  });
+});
+
+const EMPTY_ENTITIES: ArchitectureEntities = { assets: [], dataFlows: [], risks: [] };
+const SAMPLE_ENTITIES: ArchitectureEntities = {
+  assets: [
+    { name: "DMS Server", assetType: "database", description: "", owner: "IT", location: "on-prem", storesNpi: true, criticality: "critical", vendor: "CDK" },
+  ],
+  dataFlows: [
+    { name: "Lender submission", description: "", externalParty: "RouteOne", dataTypes: "SSN, credit app", direction: "outbound", transportEncryption: "tls" },
+  ],
+  risks: [
+    { title: "Unencrypted backups", description: "Nightly backups not encrypted", likelihood: "high", impact: "high", severity: "critical", status: "open" },
+  ],
+};
+
+describe("Security Architecture Assessment PDF", () => {
+  it("generates a PDF from answers with no entities inventoried", async () => {
+    const bytes = await generateSecurityArchitectureAssessment(
+      dealership,
+      answersForAllSections("no"),
+      EMPTY_ENTITIES,
+    );
+    expect(bytes.length).toBeGreaterThan(1000);
+    expect(String.fromCharCode(...bytes.slice(0, 5))).toBe("%PDF-");
+  });
+
+  it("generates a PDF grounded in inventoried assets, flows, and risks", async () => {
+    const bytes = await generateSecurityArchitectureAssessment(
+      dealership,
+      answersForAllSections("yes"),
+      SAMPLE_ENTITIES,
+    );
+    expect(bytes.length).toBeGreaterThan(1000);
+    expect(String.fromCharCode(...bytes.slice(0, 5))).toBe("%PDF-");
+  });
+
+  it("accepts optional per-domain narratives without changing the PDF header", async () => {
+    const bytes = await generateSecurityArchitectureAssessment(
+      dealership,
+      answersForAllSections("no"),
+      EMPTY_ENTITIES,
+      { access_identity: "Expert prose about access controls." },
+    );
+    expect(String.fromCharCode(...bytes.slice(0, 5))).toBe("%PDF-");
+  });
+});
+
+describe("Written Risk Assessment PDF", () => {
+  it("generates a PDF with an empty inventory", async () => {
+    const bytes = await generateRiskAssessment(dealership, [], EMPTY_ENTITIES);
+    expect(bytes.length).toBeGreaterThan(1000);
+    expect(String.fromCharCode(...bytes.slice(0, 5))).toBe("%PDF-");
+  });
+
+  it("generates a PDF from a populated risk register", async () => {
+    const bytes = await generateRiskAssessment(
+      dealership,
+      answersForAllSections("partial"),
+      SAMPLE_ENTITIES,
+    );
+    expect(bytes.length).toBeGreaterThan(1000);
+    expect(String.fromCharCode(...bytes.slice(0, 5))).toBe("%PDF-");
   });
 });

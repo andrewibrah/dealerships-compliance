@@ -9,6 +9,7 @@ import Signup from "./pages/Signup";
 import Login from "./pages/Login";
 import Dashboard from "./pages/Dashboard";
 import Summary from "./pages/Summary";
+import Architecture from "./pages/Architecture";
 import Wizard from "./pages/Wizard";
 import Documents from "./pages/Documents";
 import Tasks from "./pages/Tasks";
@@ -26,6 +27,7 @@ function AppRouter() {
         <Route path={"/login"} component={Login} />
         <Route path={"/dashboard"} component={Dashboard} />
         <Route path={"/summary"} component={Summary} />
+        <Route path={"/architecture"} component={Architecture} />
         <Route path={"/profile"} component={Profile} />
         <Route path={"/wizard"} component={Wizard} />
         <Route path={"/documents"} component={Documents} />

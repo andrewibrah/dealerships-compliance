@@ -9,6 +9,8 @@ import { toast } from "sonner";
 const DOC_TYPE_LABELS: Record<string, string> = {
   wisp: "WISP Document",
   board_report: "Board Report",
+  security_architecture: "Security Architecture Assessment",
+  risk_assessment: "Written Risk Assessment",
 };
 
 export default function Documents() {
@@ -47,7 +49,19 @@ export default function Documents() {
     onSuccess: (res) => onGenerated(res.url, "Board report"),
     onError: (e) => onGenerateError(e.message),
   });
-  const isGenerating = generateWISP.isPending || generateBoardReport.isPending;
+  const generateArchitecture = trpc.pdf.generateSecurityArchitectureAssessment.useMutation({
+    onSuccess: (res) => onGenerated(res.url, "Security Architecture Assessment"),
+    onError: (e) => onGenerateError(e.message),
+  });
+  const generateRiskAssessment = trpc.pdf.generateRiskAssessment.useMutation({
+    onSuccess: (res) => onGenerated(res.url, "Written Risk Assessment"),
+    onError: (e) => onGenerateError(e.message),
+  });
+  const isGenerating =
+    generateWISP.isPending ||
+    generateBoardReport.isPending ||
+    generateArchitecture.isPending ||
+    generateRiskAssessment.isPending;
 
   if (loading || (isAuthenticated && (subscriptionQuery.isLoading || dealershipQuery.isLoading))) {
     return (
@@ -76,6 +90,22 @@ export default function Documents() {
       return;
     }
     generateBoardReport.mutate();
+  };
+
+  const handleGenerateArchitecture = () => {
+    if (!hasSubscription) {
+      setLocation("/pricing");
+      return;
+    }
+    generateArchitecture.mutate();
+  };
+
+  const handleGenerateRiskAssessment = () => {
+    if (!hasSubscription) {
+      setLocation("/pricing");
+      return;
+    }
+    generateRiskAssessment.mutate();
   };
 
   const documents = documentsQuery.data ?? [];
@@ -222,6 +252,87 @@ export default function Documents() {
                 ? "Generating..."
                 : hasSubscription
                   ? "Generate Board Report"
+                  : "Upgrade to generate"}
+            </Button>
+          </Card>
+
+          {/* Security Architecture Assessment */}
+          <Card className="bg-slate-800 border-slate-700 p-8 flex flex-col">
+            <div className="flex items-center gap-3 mb-4">
+              <FileText className="text-emerald-500" size={28} aria-hidden="true" />
+              <h2 className="text-2xl font-bold text-white">Security Architecture Assessment</h2>
+            </div>
+
+            <p className="text-slate-300 mb-6 flex-1">
+              An expert cybersecurity architecture review organized into six domains — Cloud &amp; Infrastructure,
+              Access &amp; Identity, Data Protection, Risk Assessment, Vendor, and an advisory AI &amp; Emerging Tech
+              lens — every finding grounded in your saved answers and inventory.
+            </p>
+
+            <div className="space-y-3 mb-6">
+              <div className="flex items-center gap-2 text-sm text-slate-400">
+                <span className="text-green-500">✓</span>
+                <span>Six architecture domains with derived posture</span>
+              </div>
+              <div className="flex items-center gap-2 text-sm text-slate-400">
+                <span className="text-green-500">✓</span>
+                <span>Every gap traced to a §314.4 citation and your answer</span>
+              </div>
+              <div className="flex items-center gap-2 text-sm text-slate-400">
+                <span className="text-green-500">✓</span>
+                <span>Grounded in your assets, data flows, and risks</span>
+              </div>
+            </div>
+
+            <Button
+              onClick={handleGenerateArchitecture}
+              disabled={isGenerating}
+              className="w-full bg-amber-600 hover:bg-amber-500 text-slate-950"
+            >
+              {generateArchitecture.isPending
+                ? "Generating..."
+                : hasSubscription
+                  ? "Generate Architecture Assessment"
+                  : "Upgrade to generate"}
+            </Button>
+          </Card>
+
+          {/* Written Risk Assessment */}
+          <Card className="bg-slate-800 border-slate-700 p-8 flex flex-col">
+            <div className="flex items-center gap-3 mb-4">
+              <FileText className="text-cyan-500" size={28} aria-hidden="true" />
+              <h2 className="text-2xl font-bold text-white">Written Risk Assessment</h2>
+            </div>
+
+            <p className="text-slate-300 mb-6 flex-1">
+              The FTC-required written risk assessment (§314.4(b)) — your inventoried systems, mapped customer-NPI
+              data flows, logged risks, and the derived risk-assessment findings in one regulator-ready document.
+            </p>
+
+            <div className="space-y-3 mb-6">
+              <div className="flex items-center gap-2 text-sm text-slate-400">
+                <span className="text-green-500">✓</span>
+                <span>Asset inventory and NPI data-flow map</span>
+              </div>
+              <div className="flex items-center gap-2 text-sm text-slate-400">
+                <span className="text-green-500">✓</span>
+                <span>Your risk register with likelihood and impact</span>
+              </div>
+              <div className="flex items-center gap-2 text-sm text-slate-400">
+                <span className="text-green-500">✓</span>
+                <span>§314.4(b) findings with reassessment cadence</span>
+              </div>
+            </div>
+
+            <Button
+              onClick={handleGenerateRiskAssessment}
+              disabled={isGenerating}
+              className="w-full bg-amber-600 hover:bg-amber-500 text-slate-950"
+            >
+              {generateRiskAssessment.isPending
+                ? "Generating..."
+                : hasSubscription
+                  ? "Generate Risk Assessment"
                   : "Upgrade to generate"}
             </Button>
           </Card>

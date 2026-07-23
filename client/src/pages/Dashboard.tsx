@@ -1,7 +1,7 @@
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { Progress } from "@/components/ui/progress";
-import { AlertTriangle, CheckCircle2, AlertCircle, TrendingUp, Loader2, FileText, ListChecks } from "lucide-react";
+import { AlertTriangle, CheckCircle2, AlertCircle, TrendingUp, Loader2, FileText, ListChecks, ShieldCheck } from "lucide-react";
 import { useLocation } from "wouter";
 import { useAuth } from "@/hooks/useAuth";
 import { trpc } from "@/lib/trpc";
@@ -163,6 +163,10 @@ export default function Dashboard() {
             <Button variant="outline" onClick={() => setLocation("/summary")}>
               <FileText size={16} className="mr-2" aria-hidden="true" />
               Risk Summary
+            </Button>
+            <Button variant="outline" onClick={() => setLocation("/architecture")}>
+              <ShieldCheck size={16} className="mr-2" aria-hidden="true" />
+              Architecture
             </Button>
             <Button onClick={() => setLocation("/wizard")} className="bg-amber-600 hover:bg-amber-500 text-slate-950">
               Continue Assessment
