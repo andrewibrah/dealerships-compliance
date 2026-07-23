@@ -7,6 +7,7 @@ import { trpc } from "@/lib/trpc";
 import { deriveAssessmentFromAnswers, type DerivedGap } from "@shared/derivation";
 import { REQUIREMENT_CATALOG, REQUIREMENT_GUIDANCE } from "@shared/requirements";
 import type { AnswerValue } from "@shared/controls";
+import { getApplicability, applicableRequirements } from "@shared/applicability";
 
 // Signature one-pager (PRD #30): "here's your risk -> why it matters -> here's the fix."
 // Fully deterministic — every line traces to shared/derivation.ts (the derived gap + its
@@ -71,7 +72,15 @@ export default function Summary() {
   (answersQuery.data ?? []).forEach((row) => {
     Object.assign(flatAnswers, (row.answers as Record<string, AnswerValue>) ?? {});
   });
-  const assessment = deriveAssessmentFromAnswers(REQUIREMENT_CATALOG, flatAnswers);
+  // Scope-aware (PRD #7): exclude §314.6-exempt requirements. Default (no consumer count) is
+  // identity — the full catalog — so the summary is unchanged for existing dealers.
+  const applicability = getApplicability({
+    consumerCount: dealershipQuery.data?.consumerCount ?? null,
+  });
+  const assessment = deriveAssessmentFromAnswers(
+    applicableRequirements(REQUIREMENT_CATALOG, applicability),
+    flatAnswers
+  );
 
   // Rank every open gap: critical first, high-enforcement sections (Access, Encryption,
   // Incident Response) ahead of the rest — the same weighting the PDFs use.

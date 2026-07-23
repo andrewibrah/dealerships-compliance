@@ -6,6 +6,9 @@ import { resolveTenantScope, type TenantScope } from '@shared/tenant-guard';
 import { AUDIT_ACTIONS } from '@shared/audit';
 import { deriveControlStatus, type AnswerValue } from '@shared/controls';
 import { deriveTasksFromControls } from '@shared/task-derivation';
+import { getAllQuestions } from '@shared/safeguards-questions';
+import { rephraseQuestion } from '@shared/interview-phrasing';
+import { ENV } from './_core/env';
 import { storageGetSignedUrl, evidenceGetSignedUrl } from './storage';
 import { pdfRouter } from './pdf-router';
 import { stripeRouter } from './stripe-router';
@@ -78,6 +81,7 @@ export const appRouter = router({
           rooftopCount: z.number().int().min(1).optional(),
           qualifiedIndividual: z.string().optional(),
           qiEmail: z.string().email().or(z.literal('')).optional(),
+          consumerCount: z.number().int().nonnegative().nullable().optional(),
         })
       )
       .mutation(async ({ ctx, input }) => {
@@ -91,6 +95,7 @@ export const appRouter = router({
           rooftopCount: input.rooftopCount ?? 1,
           qualifiedIndividual: input.qualifiedIndividual ?? '',
           qiEmail: input.qiEmail ?? '',
+          consumerCount: input.consumerCount ?? null,
         });
         await db.appendAuditLog({
           action: AUDIT_ACTIONS.dealershipCreate,
@@ -115,6 +120,7 @@ export const appRouter = router({
           rooftopCount: z.number().int().min(1).optional(),
           qualifiedIndividual: z.string().optional(),
           qiEmail: z.string().email().or(z.literal('')).optional(),
+          consumerCount: z.number().int().nonnegative().nullable().optional(),
         })
       )
       .mutation(async ({ ctx, input }) => {
@@ -223,6 +229,23 @@ export const appRouter = router({
           },
         });
         return { success: true };
+      }),
+  }),
+
+  // Optional conversational phrasing (PRD #11/#39) — DISPLAY ONLY. A QUERY: it writes
+  // nothing (no audit). It rephrases ONE server-owned question's text; the model NEVER
+  // decides an answer, status, score, or citation. Returns { text } only. Passthrough
+  // (original text) when ANTHROPIC_API_KEY is absent. Mirrored in the Deno router.
+  interview: router({
+    rephrase: protectedProcedure
+      .input(z.object({ questionId: z.string() }))
+      .query(async ({ input }) => {
+        const question = getAllQuestions().find((q) => q.id === input.questionId);
+        if (!question) return { text: '' };
+        return rephraseQuestion(
+          { questionText: question.text, hint: question.hint },
+          { apiKey: ENV.anthropicApiKey },
+        );
       }),
   }),
 

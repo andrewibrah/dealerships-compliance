@@ -59,6 +59,9 @@ export const dealerships = pgTable('dealerships', {
   rooftopCount: integer('rooftop_count').notNull().default(1),
   qualifiedIndividual: text('qualified_individual').notNull().default(''),
   qiEmail: varchar('qi_email', { length: 320 }).notNull().default(''),
+  // Consumer count drives the §314.6(a) small-institution exemption (PRD #7). Nullable:
+  // unset means "not declared" -> nothing is exempt (safe default, identical to today).
+  consumerCount: integer('consumer_count'),
   createdAt: timestamp('created_at').notNull().defaultNow(),
   updatedAt: timestamp('updated_at').notNull().defaultNow(),
 }, (t) => [index('dealerships_user_id_idx').on(t.userId)]);

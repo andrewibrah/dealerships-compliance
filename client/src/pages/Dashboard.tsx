@@ -18,6 +18,11 @@ import {
 } from "@shared/derivation";
 import { REQUIREMENT_CATALOG, REQUIREMENT_GUIDANCE } from "@shared/requirements";
 import type { AnswerValue } from "@shared/controls";
+import {
+  getApplicability,
+  applicableQuestions,
+  applicableRequirements,
+} from "@shared/applicability";
 
 /** The dealer's saved answer for a gap, phrased for the reader (grounded in the derived status). */
 function triggeringAnswerLabel(gap: DerivedGap): string {
@@ -55,15 +60,28 @@ export default function Dashboard() {
     Object.assign(flatAnswers, rowAnswers);
   });
 
-  const sectionResults: SectionScore[] = SAFEGUARDS_SECTIONS.map((sec) => ({
-    ...calculateSectionScore(grouped[sec.number] || {}, sec.questions),
+  // Scope-aware (PRD #7): under the §314.6 exemption, out-of-scope questions leave the
+  // denominator and fully-exempt sections drop out entirely. Default (no consumer count) is
+  // identity — all nine sections, every question — so scores stay identical to today.
+  const applicability = getApplicability({
+    consumerCount: dealershipQuery.data?.consumerCount ?? null,
+  });
+  const applicableSections = SAFEGUARDS_SECTIONS.filter(
+    (sec) => applicableQuestions(sec.questions, applicability).length > 0
+  );
+
+  const sectionResults: SectionScore[] = applicableSections.map((sec) => ({
+    ...calculateSectionScore(grouped[sec.number] || {}, applicableQuestions(sec.questions, applicability)),
     section: sec.number,
     sectionName: sec.name,
   }));
 
   // Explainability spine: same scores as sectionResults (proven equivalent in
   // server/derivation.test.ts), but each gap carries its §314.4 citation + triggering answer.
-  const assessment = deriveAssessmentFromAnswers(REQUIREMENT_CATALOG, flatAnswers);
+  const assessment = deriveAssessmentFromAnswers(
+    applicableRequirements(REQUIREMENT_CATALOG, applicability),
+    flatAnswers
+  );
 
   const sectionScores: Record<number, number> = {};
   sectionResults.forEach((r) => {
@@ -207,7 +225,8 @@ export default function Dashboard() {
             <div>
               <h3 className="text-sm font-semibold text-slate-300 mb-4">Sections Completed</h3>
               <div className="text-3xl font-bold text-white">
-                {Object.values(sectionScores).filter((s) => s > 0).length} <span className="text-lg text-slate-400">/ 9</span>
+                {Object.values(sectionScores).filter((s) => s > 0).length}{" "}
+                <span className="text-lg text-slate-400">/ {applicableSections.length}</span>
               </div>
             </div>
 

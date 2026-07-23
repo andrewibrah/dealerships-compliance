@@ -8,6 +8,12 @@ import {
 } from "./derivation.ts";
 import { REQUIREMENT_CATALOG, REQUIREMENT_GUIDANCE } from "./requirements.ts";
 import type { AnswerValue } from "./controls.ts";
+import {
+  getApplicability,
+  applicableQuestions,
+  applicableRequirements,
+  type Applicability,
+} from "./applicability.ts";
 
 /**
  * PDF generation for WISP and board report.
@@ -24,6 +30,8 @@ export interface DealershipInfo {
   rooftopCount: number;
   qualifiedIndividual: string;
   qiEmail: string;
+  /** Drives the §314.6(a) exemption (PRD #7). Null/undefined -> nothing exempt (default). */
+  consumerCount?: number | null;
 }
 
 export interface ComplianceAnswerRow {
@@ -58,17 +66,31 @@ function riskLabel(score: number): string {
   return "LOW RISK";
 }
 
-/** Compute section results from raw answers so PDFs always reflect the saved data. */
-export function computeSectionResults(rows: ComplianceAnswerRow[]): SectionScore[] {
+/**
+ * Compute section results from raw answers so PDFs always reflect the saved data. Scope-aware
+ * (PRD #7): questions out of scope under §314.6 are dropped from their section's denominator,
+ * and a section left with no in-scope questions is omitted entirely. The default applicability
+ * (no consumer count) is identity — every question in every section, byte-identical to before.
+ */
+export function computeSectionResults(
+  rows: ComplianceAnswerRow[],
+  applicability: Applicability = getApplicability({}),
+): SectionScore[] {
   const bySection = new Map<number, Record<string, unknown>>();
   for (const row of rows) {
     bySection.set(row.section, (row.answers as Record<string, unknown>) ?? {});
   }
-  return SAFEGUARDS_SECTIONS.map((sec) => ({
-    ...calculateSectionScore(bySection.get(sec.number) ?? {}, sec.questions),
-    section: sec.number,
-    sectionName: sec.name,
-  }));
+  const results: SectionScore[] = [];
+  for (const sec of SAFEGUARDS_SECTIONS) {
+    const questions = applicableQuestions(sec.questions, applicability);
+    if (questions.length === 0) continue;
+    results.push({
+      ...calculateSectionScore(bySection.get(sec.number) ?? {}, questions),
+      section: sec.number,
+      sectionName: sec.name,
+    });
+  }
+  return results;
 }
 
 export function computeOverallScore(rows: ComplianceAnswerRow[]): number {
@@ -219,11 +241,16 @@ export async function generateWISP(
   dealership: DealershipInfo,
   complianceAnswers: ComplianceAnswerRow[]
 ): Promise<Uint8Array> {
-  const results = computeSectionResults(complianceAnswers);
+  const applicability = getApplicability({ consumerCount: dealership.consumerCount ?? null });
+  const results = computeSectionResults(complianceAnswers, applicability);
   const overall = calculateOverallScore(results);
   // Explainability spine: same numbers as `results` (proven equivalent in
   // server/derivation.test.ts), but each gap carries its §314.4 citation + triggering answer.
-  const assessment = deriveAssessmentFromAnswers(REQUIREMENT_CATALOG, flattenAnswers(complianceAnswers));
+  // Same in-scope requirement set as the scoring path, so the two agree for exempt dealers too.
+  const assessment = deriveAssessmentFromAnswers(
+    applicableRequirements(REQUIREMENT_CATALOG, applicability),
+    flattenAnswers(complianceAnswers),
+  );
   const derivedBySection = new Map(assessment.sections.map((s) => [s.section, s]));
   const w = await PdfWriter.create();
 
@@ -255,19 +282,29 @@ export async function generateWISP(
     gapAfter: 8,
   });
 
+  const resultBySection = new Map(results.map((r) => [r.section, r]));
   for (const sec of SAFEGUARDS_SECTIONS) {
-    const result = results.find((r) => r.section === sec.number)!;
     w.heading(`Element ${sec.number}: ${sec.name}`, 12);
     w.text(sec.description, { color: SLATE });
+
+    const applicableQ = applicableQuestions(sec.questions, applicability);
+    if (applicableQ.length === 0) {
+      w.text(
+        "Not applicable under the 16 CFR §314.6 small-institution exemption (fewer than 5,000 consumers).",
+        { color: SLATE, gapAfter: 6 },
+      );
+      continue;
+    }
+    const result = resultBySection.get(sec.number)!;
     w.text(`Section score: ${result.score}%`, {
       bold: true,
       color: riskColor(result.score),
     });
 
-    const answered = sec.questions.length - result.gaps.length;
+    const answered = applicableQ.length - result.gaps.length;
     if (answered > 0) {
       w.text(
-        `${answered} of ${sec.questions.length} safeguards in this element are confirmed in place.`
+        `${answered} of ${applicableQ.length} safeguards in this element are confirmed in place.`
       );
     } else {
       w.text("No safeguards in this element are confirmed in place yet.", { color: SLATE });
@@ -330,9 +367,13 @@ export async function generateBoardReport(
   dealership: DealershipInfo,
   complianceAnswers: ComplianceAnswerRow[]
 ): Promise<Uint8Array> {
-  const results = computeSectionResults(complianceAnswers);
+  const applicability = getApplicability({ consumerCount: dealership.consumerCount ?? null });
+  const results = computeSectionResults(complianceAnswers, applicability);
   const overall = calculateOverallScore(results);
-  const assessment = deriveAssessmentFromAnswers(REQUIREMENT_CATALOG, flattenAnswers(complianceAnswers));
+  const assessment = deriveAssessmentFromAnswers(
+    applicableRequirements(REQUIREMENT_CATALOG, applicability),
+    flattenAnswers(complianceAnswers),
+  );
   const w = await PdfWriter.create();
 
   w.text("ANNUAL COMPLIANCE REPORT", { size: 17, bold: true, color: NAVY });

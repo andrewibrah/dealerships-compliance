@@ -21,6 +21,7 @@ type ProfileForm = {
   rooftopCount: string;
   qualifiedIndividual: string;
   qiEmail: string;
+  consumerCount: string;
 };
 
 const emptyForm: ProfileForm = {
@@ -32,6 +33,7 @@ const emptyForm: ProfileForm = {
   rooftopCount: "1",
   qualifiedIndividual: "",
   qiEmail: "",
+  consumerCount: "",
 };
 
 export default function Profile() {
@@ -54,6 +56,10 @@ export default function Profile() {
       rooftopCount: String(dealershipQuery.data.rooftopCount || 1),
       qualifiedIndividual: dealershipQuery.data.qualifiedIndividual || "",
       qiEmail: dealershipQuery.data.qiEmail || "",
+      consumerCount:
+        dealershipQuery.data.consumerCount != null
+          ? String(dealershipQuery.data.consumerCount)
+          : "",
     });
   }, [dealershipQuery.data]);
 
@@ -97,6 +103,8 @@ export default function Profile() {
     const name = form.name.trim();
     const qiEmail = form.qiEmail.trim();
     const rooftopCount = Number(form.rooftopCount);
+    const consumerCountRaw = form.consumerCount.trim();
+    const consumerCount = consumerCountRaw === "" ? null : Number(consumerCountRaw);
 
     if (!name) {
       toast.error("Dealership name is required");
@@ -104,6 +112,10 @@ export default function Profile() {
     }
     if (!Number.isInteger(rooftopCount) || rooftopCount < 1) {
       toast.error("Rooftop count must be at least 1");
+      return;
+    }
+    if (consumerCount !== null && (!Number.isInteger(consumerCount) || consumerCount < 0)) {
+      toast.error("Consumer count must be a whole number (or left blank)");
       return;
     }
     if (qiEmail && !emailPattern.test(qiEmail)) {
@@ -120,6 +132,7 @@ export default function Profile() {
       rooftopCount,
       qualifiedIndividual: form.qualifiedIndividual.trim(),
       qiEmail,
+      consumerCount,
     };
 
     if (dealershipQuery.data) {
@@ -230,6 +243,28 @@ export default function Profile() {
                   onChange={(event) => setField("qiEmail", event.target.value)}
                   placeholder="jane@dealership.com"
                 />
+              </div>
+
+              <div className="md:col-span-2 space-y-2">
+                <Label htmlFor="consumerCount" className="text-slate-300">
+                  How many consumers&rsquo; information do you maintain?
+                </Label>
+                <Input
+                  id="consumerCount"
+                  type="number"
+                  min={0}
+                  step={1}
+                  value={form.consumerCount}
+                  onChange={(event) => setField("consumerCount", event.target.value)}
+                  placeholder="e.g. 3200 (leave blank if unsure)"
+                  aria-describedby="consumerCount-hint"
+                />
+                <p id="consumerCount-hint" className="text-sm text-slate-400">
+                  Maintaining information on fewer than 5,000 consumers may qualify your
+                  dealership for the 16 CFR &sect;314.6 exemption, which drops a few Safeguards
+                  requirements. Leave blank if you&rsquo;re not sure &mdash; nothing is exempted
+                  until you enter a number.
+                </p>
               </div>
             </div>
 

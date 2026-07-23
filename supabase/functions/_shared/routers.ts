@@ -10,6 +10,8 @@ import { resolveTenantScope, type TenantScope } from '../../../shared/tenant-gua
 import { AUDIT_ACTIONS } from '../../../shared/audit.ts';
 import { deriveControlStatus, type AnswerValue } from '../../../shared/controls.ts';
 import { deriveTasksFromControls } from '../../../shared/task-derivation.ts';
+import { getAllQuestions } from '../../../shared/safeguards-questions.ts';
+import { rephraseQuestion } from '../../../shared/interview-phrasing.ts';
 
 // JSONB -> Control cutover (PRD #5). Additively project a saved section's answers onto derived
 // Control rows — one per answered requirement present in the GLOBAL catalog. Runs AFTER the
@@ -65,6 +67,7 @@ const dealershipRouter = router({
       rooftopCount: z.number().int().min(1).optional(),
       qualifiedIndividual: z.string().optional(),
       qiEmail: z.string().email().or(z.literal('')).optional(),
+      consumerCount: z.number().int().nonnegative().nullable().optional(),
     }))
     .mutation(async ({ ctx, input }) => {
       const dealership = await db.createDealership({
@@ -77,6 +80,7 @@ const dealershipRouter = router({
         rooftopCount: input.rooftopCount ?? 1,
         qualifiedIndividual: input.qualifiedIndividual ?? '',
         qiEmail: input.qiEmail ?? '',
+        consumerCount: input.consumerCount ?? null,
       });
       await db.appendAuditLog({
         action: AUDIT_ACTIONS.dealershipCreate,
@@ -99,6 +103,7 @@ const dealershipRouter = router({
       rooftopCount: z.number().int().min(1).optional(),
       qualifiedIndividual: z.string().optional(),
       qiEmail: z.string().email().or(z.literal('')).optional(),
+      consumerCount: z.number().int().nonnegative().nullable().optional(),
     }))
     .mutation(async ({ ctx, input }) => {
       const existing = await db.getDealershipByUserId(ctx.user.id);
@@ -198,6 +203,23 @@ const complianceRouter = router({
         metadata: { section: input.section, sectionName: input.sectionName, completed, controlsUpserted },
       });
       return row;
+    }),
+});
+
+// Optional conversational phrasing (PRD #11/#39) — DISPLAY ONLY. A QUERY: it writes nothing
+// (no audit). It rephrases ONE server-owned question's text; the model NEVER decides an
+// answer, status, score, or citation. Returns { text } only. Passthrough (original text)
+// when ANTHROPIC_API_KEY is absent. Mirror of server/routers.ts interview router.
+const interviewRouter = router({
+  rephrase: protectedProcedure
+    .input(z.object({ questionId: z.string() }))
+    .query(async ({ input }) => {
+      const question = getAllQuestions().find((q) => q.id === input.questionId);
+      if (!question) return { text: '' };
+      return rephraseQuestion(
+        { questionText: question.text, hint: question.hint },
+        { apiKey: ENV.anthropicApiKey },
+      );
     }),
 });
 
@@ -882,6 +904,7 @@ export const appRouter = router({
   auth: authRouter,
   dealership: dealershipRouter,
   compliance: complianceRouter,
+  interview: interviewRouter,
   requirements: requirementsRouter,
   controls: controlsRouter,
   risks: risksRouter,

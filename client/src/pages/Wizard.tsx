@@ -5,6 +5,7 @@ import { useState, useEffect, useRef } from "react";
 import { useLocation } from "wouter";
 import { SAFEGUARDS_SECTIONS } from "@shared/safeguards-questions";
 import { calculateSectionScore, calculateOverallScore } from "@shared/scoring";
+import { getApplicability, applicableQuestions } from "@shared/applicability";
 import { AlertCircle, CheckCircle2, AlertTriangle, Loader2, Check } from "lucide-react";
 import { trpc } from "@/lib/trpc";
 import { useAuth } from "@/hooks/useAuth";
@@ -22,6 +23,27 @@ const ANSWER_OPTIONS = {
   ],
 } as const;
 
+// Conversational phrasing (PRD #11/#39) — DISPLAY ONLY. Swaps in an LLM-rephrased version of
+// the question TEXT when conversational mode is on and a rephrasing is available; otherwise
+// renders the canonical question text. It never touches the answer controls, so the structured
+// radiogroup stays the sole writer of state. With no ANTHROPIC_API_KEY the query passes the
+// original text straight through, so this degrades to today's plain form view.
+function QuestionText({
+  questionId,
+  fallback,
+  conversational,
+}: {
+  questionId: string;
+  fallback: string;
+  conversational: boolean;
+}) {
+  const rephrase = trpc.interview.rephrase.useQuery(
+    { questionId },
+    { enabled: conversational, staleTime: Infinity }
+  );
+  return <>{conversational && rephrase.data?.text ? rephrase.data.text : fallback}</>;
+}
+
 export default function Wizard() {
   const [, setLocation] = useLocation();
   const { isAuthenticated } = useAuth();
@@ -30,6 +52,7 @@ export default function Wizard() {
   const [sectionScores, setSectionScores] = useState<Record<number, number>>({});
   const [overallScore, setOverallScore] = useState(0);
   const [riskLevel, setRiskLevel] = useState<"critical" | "high" | "medium" | "low">("critical");
+  const [conversational, setConversational] = useState(false);
 
   const totalSections = SAFEGUARDS_SECTIONS.length;
   const progress = ((currentSection + 1) / totalSections) * 100;
@@ -41,6 +64,20 @@ export default function Wizard() {
     enabled: isAuthenticated,
   });
   const isLoadingAnswers = isAuthenticated && answersQuery.isLoading;
+
+  // Applicability (PRD #7): under the §314.6 exemption, out-of-scope questions are hidden and
+  // excluded from scoring. Default (no consumer count) is identity — every question shows and
+  // counts, byte-identical to today.
+  const dealershipQuery = trpc.dealership.getCurrent.useQuery(undefined, {
+    enabled: isAuthenticated,
+  });
+  const consumerCount = dealershipQuery.data?.consumerCount ?? null;
+  const applicability = getApplicability({ consumerCount });
+  const visibleQuestions = applicableQuestions(section.questions, applicability);
+  const hiddenCount = section.questions.length - visibleQuestions.length;
+  const applicableSectionList = SAFEGUARDS_SECTIONS.filter(
+    (sec) => applicableQuestions(sec.questions, applicability).length > 0
+  );
 
   useEffect(() => {
     if (!answersQuery.data) return;
@@ -72,7 +109,10 @@ export default function Wizard() {
 
     for (const sec of SAFEGUARDS_SECTIONS) {
       const sectionAnswers = answers[sec.number] || {};
-      const scoreResult = calculateSectionScore(sectionAnswers, sec.questions);
+      const scoreResult = calculateSectionScore(
+        sectionAnswers,
+        applicableQuestions(sec.questions, applicability)
+      );
       newScores[sec.number] = scoreResult.score;
       allScores.push({
         ...scoreResult,
@@ -88,11 +128,13 @@ export default function Wizard() {
       setOverallScore(overall.overall);
       setRiskLevel(overall.riskLevel);
     }
-  }, [answers]);
+    // applicability is derived purely from consumerCount; that primitive is the real dep.
+  }, [answers, consumerCount]);
 
   const persistSection = (nextSectionAnswers: Record<string, any>) => {
-    const scoreResult = calculateSectionScore(nextSectionAnswers, section.questions);
-    const completed = section.questions.every(
+    // Score + completion track only the in-scope questions for this dealer (PRD #7).
+    const scoreResult = calculateSectionScore(nextSectionAnswers, visibleQuestions);
+    const completed = visibleQuestions.every(
       (q) => nextSectionAnswers[q.id] !== undefined && nextSectionAnswers[q.id] !== ""
     );
 
@@ -235,10 +277,34 @@ export default function Wizard() {
           <div className="lg:col-span-2">
             <Card className="bg-slate-800 border-slate-700 p-8">
               <h2 className="text-2xl font-bold text-white mb-2">{section.name}</h2>
-              <p className="text-slate-400 mb-8">{section.description}</p>
+              <div className="flex items-start justify-between gap-4 mb-8">
+                <p className="text-slate-400">{section.description}</p>
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  aria-pressed={conversational}
+                  onClick={() => setConversational((value) => !value)}
+                  className="flex-shrink-0"
+                >
+                  {conversational ? "Plain questions" : "Conversational mode"}
+                </Button>
+              </div>
 
               <div className="space-y-8">
-                {section.questions.map((question) => {
+                {visibleQuestions.length === 0 && (
+                  <div className="rounded-lg border border-slate-700 bg-slate-900/40 p-4">
+                    <p className="font-medium text-white mb-1">
+                      This element does not apply to your dealership
+                    </p>
+                    <p className="text-sm text-slate-400">
+                      Under the 16 CFR &sect;314.6 small-institution exemption (fewer than 5,000
+                      consumers), none of this element&rsquo;s safeguards are required, so it is
+                      excluded from your compliance score.
+                    </p>
+                  </div>
+                )}
+                {visibleQuestions.map((question) => {
                   const selected = answers[sectionNumber]?.[question.id];
                   const isText = question.type === "text";
                   const options =
@@ -255,7 +321,11 @@ export default function Wizard() {
                             htmlFor={`q-${question.id}`}
                             className="text-white font-medium block mb-2"
                           >
-                            {question.text}
+                            <QuestionText
+                              questionId={question.id}
+                              fallback={question.text}
+                              conversational={conversational}
+                            />
                           </label>
                         ) : (
                           // Not a <label>: its control is a radio group, and <label>
@@ -264,7 +334,11 @@ export default function Wizard() {
                             id={`q-${question.id}-label`}
                             className="text-white font-medium block mb-2"
                           >
-                            {question.text}
+                            <QuestionText
+                              questionId={question.id}
+                              fallback={question.text}
+                              conversational={conversational}
+                            />
                           </span>
                         )}
                         {question.hint && (
@@ -332,6 +406,13 @@ export default function Wizard() {
                   </div>
                   );
                 })}
+                {visibleQuestions.length > 0 && hiddenCount > 0 && (
+                  <p className="text-sm text-slate-400">
+                    {hiddenCount} question{hiddenCount === 1 ? "" : "s"} in this element{" "}
+                    {hiddenCount === 1 ? "is" : "are"} not applicable under the &sect;314.6
+                    exemption and {hiddenCount === 1 ? "was" : "were"} excluded from your score.
+                  </p>
+                )}
               </div>
             </Card>
           </div>
@@ -363,7 +444,7 @@ export default function Wizard() {
             <Card className="bg-slate-800 border-slate-700 p-6">
               <h3 className="font-bold text-white mb-4">Section Scores</h3>
               <div className="space-y-3">
-                {SAFEGUARDS_SECTIONS.map((sec) => (
+                {applicableSectionList.map((sec) => (
                   <div key={sec.number} className="flex items-center justify-between">
                     <span className="text-sm text-slate-300">{sec.name}</span>
                     <span
