@@ -19,6 +19,7 @@ const DOC_TYPE_LABELS: Record<string, string> = {
   policy_mfa: "Multi-Factor Authentication Policy",
   policy_disposal: "Data Retention & Secure Disposal Policy",
   policy_change_management: "Change Management Policy",
+  examiner_package: "Examiner Package",
 };
 
 export default function Documents() {
@@ -74,13 +75,18 @@ export default function Documents() {
     onSuccess: (res) => onGenerated(res.url, POLICY_DEFINITIONS[policyType].title),
     onError: (e) => onGenerateError(e.message),
   });
+  const generateExaminer = trpc.pdf.generateExaminerPackage.useMutation({
+    onSuccess: (res) => onGenerated(res.url, "Examiner Package"),
+    onError: (e) => onGenerateError(e.message),
+  });
   const isGenerating =
     generateWISP.isPending ||
     generateBoardReport.isPending ||
     generateArchitecture.isPending ||
     generateRiskAssessment.isPending ||
     generateIRP.isPending ||
-    generatePolicy.isPending;
+    generatePolicy.isPending ||
+    generateExaminer.isPending;
 
   if (loading || (isAuthenticated && (subscriptionQuery.isLoading || dealershipQuery.isLoading))) {
     return (
@@ -141,6 +147,14 @@ export default function Documents() {
       return;
     }
     generatePolicy.mutate({ policyType });
+  };
+
+  const handleGenerateExaminer = () => {
+    if (!hasSubscription) {
+      setLocation("/pricing");
+      return;
+    }
+    generateExaminer.mutate();
   };
 
   const documents = documentsQuery.data ?? [];
@@ -472,6 +486,47 @@ export default function Documents() {
                 ? "Generating..."
                 : hasSubscription
                   ? "Generate Policy"
+                  : "Upgrade to generate"}
+            </Button>
+          </Card>
+
+          {/* Examiner Package */}
+          <Card className="bg-slate-800 border-slate-700 p-8 flex flex-col">
+            <div className="flex items-center gap-3 mb-4">
+              <ShieldCheck className="text-teal-500" size={28} aria-hidden="true" />
+              <h2 className="text-2xl font-bold text-white">Examiner Package</h2>
+            </div>
+
+            <p className="text-slate-300 mb-6 flex-1">
+              One combined, audit-ready PDF for an FTC examiner or your board — your compliance posture,
+              a manifest of every generated document, an evidence index, and an append-only audit-trail
+              extract, assembled from your saved records.
+            </p>
+
+            <div className="space-y-3 mb-6">
+              <div className="flex items-center gap-2 text-sm text-slate-400">
+                <span className="text-green-500">✓</span>
+                <span>Posture summary with each critical gap's §314.4 citation</span>
+              </div>
+              <div className="flex items-center gap-2 text-sm text-slate-400">
+                <span className="text-green-500">✓</span>
+                <span>Document manifest and linked-evidence index</span>
+              </div>
+              <div className="flex items-center gap-2 text-sm text-slate-400">
+                <span className="text-green-500">✓</span>
+                <span>Append-only audit-trail extract (who, what, when)</span>
+              </div>
+            </div>
+
+            <Button
+              onClick={handleGenerateExaminer}
+              disabled={isGenerating}
+              className="w-full bg-amber-600 hover:bg-amber-500 text-slate-950"
+            >
+              {generateExaminer.isPending
+                ? "Generating..."
+                : hasSubscription
+                  ? "Generate Examiner Package"
                   : "Upgrade to generate"}
             </Button>
           </Card>

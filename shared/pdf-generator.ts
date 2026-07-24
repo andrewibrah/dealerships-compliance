@@ -921,6 +921,226 @@ export async function generateIncidentResponsePlan(
   return w.save();
 }
 
+// --- Phase 3b #36: audit-ready Examiner Package ---------------------------------------------
+//
+// One combined PDF an FTC examiner or the board can receive: cover + overall posture, a posture
+// summary by element with each critical gap's §314.4 citation, a manifest of the dealership's
+// generated documents, an evidence index, and an append-only audit-trail extract. Reuses
+// PdfWriter / writeDisclaimer / writeCoveredEntity / writeGapDetail and the derivation spine —
+// NO new PDF library. Every line traces to a REAL row (generated_documents, evidence, audit_log)
+// or the deterministic posture derivation / a §314.4 citation. No LLM sits in this path; the
+// audit extract reproduces the recorded who/what/when rows verbatim and never fabricates one.
+
+/** Structural generated-document row for the manifest (Drizzle GeneratedDocument rows satisfy it). */
+export interface GeneratedDocumentRow {
+  docType: string;
+  version: number;
+  generatedAt: Date | string;
+}
+
+/** One evidence item for the index: its metadata + the controls it substantiates. The control
+ *  labels come from REAL evidence_controls links (surfaced control-by-control via
+ *  listEvidenceForControl) joined to the requirement catalog — never invented. */
+export interface EvidenceIndexItem {
+  title: string;
+  fileName: string;
+  linkedControls: string[];
+}
+
+/** Structural audit row for the extract (Drizzle AuditLogEntry rows satisfy it). Read-only: the
+ *  extract prints these real who/what/when rows verbatim, never a fabricated one. */
+export interface AuditLogRow {
+  action: string;
+  actorEmail: string;
+  entityType: string;
+  entityId: string;
+  createdAt: Date | string;
+}
+
+export interface ExaminerPackageData {
+  documents: GeneratedDocumentRow[];
+  evidence: EvidenceIndexItem[];
+  auditLog: AuditLogRow[];
+}
+
+/** Human-readable label for a generated-document type, mirroring the client's DOC_TYPE_LABELS.
+ *  Unknown types fall back to the raw docType so the manifest never hides a real row. */
+const EXAMINER_DOC_TYPE_LABELS: Record<string, string> = {
+  wisp: "WISP (Written Information Security Program)",
+  board_report: "Board Report",
+  security_architecture: "Security Architecture Assessment",
+  risk_assessment: "Written Risk Assessment",
+  incident_response_plan: "Incident Response Plan",
+  policy_access_control: "Access Control Policy",
+  policy_encryption: "Encryption Policy",
+  policy_mfa: "Multi-Factor Authentication Policy",
+  policy_disposal: "Data Retention & Secure Disposal Policy",
+  policy_change_management: "Change Management Policy",
+  examiner_package: "Examiner Package",
+};
+
+function examinerDocLabel(docType: string): string {
+  return EXAMINER_DOC_TYPE_LABELS[docType] ?? docType;
+}
+
+/** Format a timestamp for the examiner package (accepts a Date or an ISO string from the DB). */
+function formatExaminerTimestamp(value: Date | string): string {
+  const d = value instanceof Date ? value : new Date(value);
+  return Number.isNaN(d.getTime()) ? String(value) : d.toLocaleString();
+}
+
+/**
+ * The audit-trail extract as one line per REAL audit row (timestamp, action, actor email,
+ * entity). Pure + total: it prints EXACTLY the provided rows and never invents one, so the
+ * extract is a faithful who/what/when record. Empty input yields a single honest "none yet"
+ * line — never a fabricated entry. Exported for the no-fabrication unit test.
+ */
+export function examinerAuditLines(rows: AuditLogRow[]): string[] {
+  if (rows.length === 0) {
+    return ["No audit-trail entries have been recorded for this dealership yet."];
+  }
+  return rows.map((row) => {
+    const when = formatExaminerTimestamp(row.createdAt);
+    const entity = [row.entityType, row.entityId].filter(Boolean).join(" ");
+    const actor = row.actorEmail || "system";
+    return `${when}  —  ${row.action}  —  ${actor}${entity ? `  —  ${entity}` : ""}`;
+  });
+}
+
+/**
+ * Examiner Package (PRD #36). One combined, audit-ready PDF: (1) cover + overall posture,
+ * (2) posture summary by element with each critical gap's §314.4 citation, (3) a manifest of
+ * the dealership's generated documents, (4) an evidence index, and (5) an append-only
+ * audit-trail extract. Grounded end-to-end: posture comes from the deterministic derivation
+ * (the same numbers as the Dashboard / WISP / board report), and the manifest / evidence /
+ * audit sections print only real generated_documents / evidence / audit_log rows.
+ * ASSESSMENT_DISCLAIMER top + bottom.
+ */
+export async function generateExaminerPackage(
+  dealership: DealershipInfo,
+  complianceAnswers: ComplianceAnswerRow[],
+  data: ExaminerPackageData,
+): Promise<Uint8Array> {
+  const applicability = getApplicability({ consumerCount: dealership.consumerCount ?? null });
+  const results = computeSectionResults(complianceAnswers, applicability);
+  const overall = calculateOverallScore(results);
+  const assessment = deriveAssessmentFromAnswers(
+    applicableRequirements(REQUIREMENT_CATALOG, applicability),
+    flattenAnswers(complianceAnswers),
+  );
+  const w = await PdfWriter.create();
+
+  // 1. Cover + overall posture
+  w.text("EXAMINER PACKAGE", { size: 17, bold: true, color: NAVY });
+  w.text("FTC Safeguards Rule Compliance Dossier — 16 CFR Part 314", {
+    size: 11,
+    color: SLATE,
+    gapAfter: 10,
+  });
+  writeDisclaimer(w);
+
+  writeCoveredEntity(w, dealership);
+
+  w.heading("Overall Compliance Posture");
+  w.text(`Overall assessment score: ${overall.overall}% — ${riskLabel(overall.overall)}`, {
+    size: 13,
+    bold: true,
+    color: riskColor(overall.overall),
+  });
+  w.text(
+    "This package assembles the dealership's compliance posture, generated program documents, " +
+      "supporting evidence, and an append-only audit-trail extract into a single record for an " +
+      "examiner or the board. Every figure and row below is derived from the dealership's saved data.",
+    { color: SLATE, gapAfter: 6 },
+  );
+
+  // 2. Posture summary by element + key findings
+  w.heading("Compliance Posture by Safeguards Element");
+  if (results.length === 0) {
+    w.text("No assessment answers have been saved yet.", { color: SLATE });
+  } else {
+    for (const result of results) {
+      w.text(`${result.section}. ${result.sectionName} — ${result.score}%`, {
+        color: riskColor(result.score),
+      });
+    }
+  }
+
+  w.heading("Key Findings (open critical items)");
+  const criticalSections = assessment.sections.filter((s) => s.criticalGaps.length > 0);
+  if (criticalSections.length === 0) {
+    w.text("No critical gaps identified in the current assessment.", { color: GREEN });
+  } else {
+    for (const section of criticalSections) {
+      w.text(`${section.sectionName} (${section.score}%):`, { bold: true, color: RED });
+      for (const gap of section.criticalGaps) writeGapDetail(w, gap, true);
+    }
+  }
+  w.spacer(4);
+
+  // 3. Document manifest — one row per real generated_documents row
+  w.heading("Generated Document Manifest");
+  if (data.documents.length === 0) {
+    w.text("No compliance documents have been generated yet.", { color: SLATE });
+  } else {
+    w.text(`${data.documents.length} document(s) on file:`, { color: SLATE });
+    const ordered = [...data.documents].sort(
+      (a, b) => new Date(b.generatedAt).getTime() - new Date(a.generatedAt).getTime(),
+    );
+    for (const doc of ordered) {
+      w.text(
+        `• ${examinerDocLabel(doc.docType)} (v${doc.version}) — generated ${formatExaminerTimestamp(doc.generatedAt)}`,
+        { indent: 12, size: 9, color: rgb(0.1, 0.1, 0.1) },
+      );
+    }
+  }
+  w.spacer(4);
+
+  // 4. Evidence index — one row per real evidence row + the controls it substantiates
+  w.heading("Evidence Index");
+  if (data.evidence.length === 0) {
+    w.text(
+      "No evidence artifacts have been uploaded yet. Evidence substantiates the controls the " +
+        "dealership reports as in place.",
+      { color: SLATE },
+    );
+  } else {
+    w.text(`${data.evidence.length} evidence item(s) on file:`, { color: SLATE });
+    for (const item of data.evidence) {
+      const file = item.fileName ? ` (${item.fileName})` : "";
+      w.text(`• ${item.title}${file}`, { indent: 12, size: 9, color: rgb(0.1, 0.1, 0.1) });
+      if (item.linkedControls.length > 0) {
+        w.text(`Linked controls: ${item.linkedControls.join("; ")}`, {
+          indent: 22,
+          size: 9,
+          color: SLATE,
+        });
+      } else {
+        w.text("Not yet linked to a control.", { indent: 22, size: 9, color: SLATE });
+      }
+    }
+  }
+  w.spacer(4);
+
+  // 5. Audit-trail extract — reproduces the recorded rows verbatim (no fabrication)
+  w.heading("Audit-Trail Extract (append-only)");
+  w.text(
+    "The most recent entries from the dealership's tamper-evident audit log (who did what, when). " +
+      "The log is append-only and hash-chained; this extract reproduces the recorded rows verbatim.",
+    { size: 9, color: SLATE, gapAfter: 4 },
+  );
+  for (const line of examinerAuditLines(data.auditLog)) {
+    w.text(line, { indent: 12, size: 9, color: rgb(0.1, 0.1, 0.1) });
+  }
+  w.spacer(6);
+
+  writeDisclaimer(w);
+  w.text("Confidential — for internal, board, auditor, and regulator use.", { size: 8, color: SLATE });
+  w.text(`Generated ${new Date().toLocaleString()}`, { size: 8, color: SLATE });
+
+  return w.save();
+}
+
 /**
  * Written policy generator (§314.4(c) / PRD #22). One parameterized generator over
  * POLICY_DEFINITIONS: renders the policy's authored clauses citing the §314.4(c) subsection it

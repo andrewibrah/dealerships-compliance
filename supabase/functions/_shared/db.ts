@@ -518,4 +518,19 @@ export function appendAuditLog(event: AuditEventInput): Promise<void> {
   }, event);
 }
 
+// Audit trail READ — tenant-scoped, read-only (PRD #34/#36). Mirrors server/db.ts: the
+// audit_log table is append-only, so there is deliberately NO write/update/delete accessor.
+// Returns the dealership's own audit rows newest-first, capped, for the Examiner Package
+// extract. Filtered by dealership_id so a caller can only ever read their own tenant's rows.
+export function listAuditLog(scope: TenantScope, limit = 200) {
+  return scoped(scope.userId, async (tx) =>
+    tx
+      .select()
+      .from(auditLog)
+      .where(eq(auditLog.dealershipId, scope.dealershipId))
+      .orderBy(desc(auditLog.createdAt))
+      .limit(limit),
+  );
+}
+
 export type { User, Dealership, ComplianceAnswer, Subscription, GeneratedDocument, Requirement, Control, Risk, Evidence, Task, Policy, Asset, DataFlow, Attestation };

@@ -8,6 +8,7 @@ import {
   generateRiskAssessment,
   generateIncidentResponsePlan,
   generatePolicy,
+  generateExaminerPackage,
 } from '../../../shared/pdf-generator.ts';
 import {
   buildSecurityArchitectureAssessment,
@@ -24,7 +25,7 @@ import { AUDIT_ACTIONS } from '../../../shared/audit.ts';
 import type { AnswerValue } from '../../../shared/controls.ts';
 import { ENV } from './env.ts';
 import { router, protectedProcedure } from './trpc.ts';
-import { resolveTenantScope } from '../../../shared/tenant-guard.ts';
+import { resolveTenantScope, type TenantScope } from '../../../shared/tenant-guard.ts';
 
 async function requirePaidScope(userId: string) {
   const scope = await resolveTenantScope(db, userId);
@@ -71,6 +72,45 @@ async function domainNarratives(
     out[domain.key] = res.text;
   }
   return out;
+}
+
+/**
+ * Gather everything the Examiner Package renders (PRD #36), all tenant-scoped and read-only:
+ * the saved answers, the generated-document manifest, the evidence index (each item annotated
+ * with the controls it substantiates, reversed from listEvidenceForControl and labelled from
+ * the requirement catalog), and the append-only audit-trail extract. No fabrication — every
+ * list is a real row set for this dealership. Mirror of the Node pdf-router twin.
+ */
+async function gatherExaminerData(scope: TenantScope) {
+  const [answers, documents, evidenceRows, controls, requirements, auditRows] = await Promise.all([
+    db.getAllComplianceAnswers(scope),
+    db.getGeneratedDocuments(scope),
+    db.listEvidence(scope),
+    db.listControls(scope),
+    db.listRequirements(),
+    db.listAuditLog(scope),
+  ]);
+  const requirementById = new Map(requirements.map((r) => [r.id, r]));
+  // Reverse the control -> evidence links into evidence -> control labels, so each evidence
+  // item lists the real controls it substantiates. Labels are grounded in the requirement catalog.
+  const controlLabelsByEvidence = new Map<number, string[]>();
+  for (const control of controls) {
+    const linked = await db.listEvidenceForControl(scope, control.id);
+    if (linked.length === 0) continue;
+    const requirement = requirementById.get(control.requirementId);
+    const label = requirement ? `${requirement.citation} ${requirement.title}` : `Control #${control.id}`;
+    for (const item of linked) {
+      const labels = controlLabelsByEvidence.get(item.id) ?? [];
+      labels.push(label);
+      controlLabelsByEvidence.set(item.id, labels);
+    }
+  }
+  const evidence = evidenceRows.map((e) => ({
+    title: e.title,
+    fileName: e.fileName,
+    linkedControls: controlLabelsByEvidence.get(e.id) ?? [],
+  }));
+  return { answers, documents, evidence, auditRows };
 }
 
 export const pdfRouter = router({
@@ -270,6 +310,37 @@ export const pdfRouter = router({
 
       return { url, success: true, policyId: policy.id };
     }),
+
+  // Examiner Package PDF (PRD #36) — one combined dossier: posture summary, document manifest,
+  // evidence index, and an append-only audit-trail extract. Paid-gated + audited. Every section
+  // is grounded in real tenant rows / the deterministic derivation. Mirror of server/pdf-router.
+  generateExaminerPackage: protectedProcedure.mutation(async ({ ctx }) => {
+    const scope = await requirePaidScope(ctx.user.id);
+    const { answers, documents, evidence, auditRows } = await gatherExaminerData(scope);
+
+    const pdfBytes = await generateExaminerPackage(scope.dealership, answers, {
+      documents,
+      evidence,
+      auditLog: auditRows,
+    });
+
+    const fileName = `examiner-package-${scope.dealershipId}-${Date.now()}.pdf`;
+    const { url } = await storagePut(fileName, pdfBytes, 'application/pdf');
+
+    await db.saveGeneratedDocument(scope, {
+      docType: 'examiner_package',
+      storagePath: fileName,
+    });
+    await db.appendAuditLog({
+      action: AUDIT_ACTIONS.documentGenerate,
+      actor: { userId: ctx.user.id, email: ctx.user.email },
+      entityType: 'generated_document',
+      dealershipId: scope.dealershipId,
+      metadata: { docType: 'examiner_package' },
+    });
+
+    return { url, success: true };
+  }),
 
   getDocumentUrl: protectedProcedure
     .input(z.object({ docType: z.string() }))

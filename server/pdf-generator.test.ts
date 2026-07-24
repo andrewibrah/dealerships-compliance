@@ -6,10 +6,13 @@ import {
   generateRiskAssessment,
   generateIncidentResponsePlan,
   generatePolicy,
+  generateExaminerPackage,
+  examinerAuditLines,
   computeOverallScore,
   type DealershipInfo,
   type ComplianceAnswerRow,
   type ArchitectureEntities,
+  type ExaminerPackageData,
 } from "../shared/pdf-generator";
 import { SAFEGUARDS_SECTIONS } from "../shared/safeguards-questions";
 import { POLICY_TYPES } from "../shared/policy-templates";
@@ -140,5 +143,78 @@ describe("Written policy PDFs", () => {
       expect(bytes.length).toBeGreaterThan(1000);
       expect(String.fromCharCode(...bytes.slice(0, 5))).toBe("%PDF-");
     }
+  });
+});
+
+const SAMPLE_EXAMINER_DATA: ExaminerPackageData = {
+  documents: [
+    { docType: "wisp", version: 1, generatedAt: new Date("2026-01-02T10:00:00Z") },
+    { docType: "risk_assessment", version: 2, generatedAt: "2026-02-03T12:00:00Z" },
+  ],
+  evidence: [
+    {
+      title: "MFA screenshot",
+      fileName: "mfa.png",
+      linkedControls: ["§314.4(c)(5) Multi-factor authentication"],
+    },
+    { title: "Retention policy", fileName: "retention.pdf", linkedControls: [] },
+  ],
+  auditLog: [
+    {
+      action: "document.generate",
+      actorEmail: "qi@testmotors.com",
+      entityType: "generated_document",
+      entityId: "12",
+      createdAt: new Date("2026-03-01T09:00:00Z"),
+    },
+    {
+      action: "compliance.save_section",
+      actorEmail: "qi@testmotors.com",
+      entityType: "compliance_answer",
+      entityId: "4",
+      createdAt: "2026-03-02T09:30:00Z",
+    },
+  ],
+};
+
+describe("Examiner Package PDF", () => {
+  it("renders a combined PDF from posture, documents, evidence, and audit rows", async () => {
+    const bytes = await generateExaminerPackage(
+      dealership,
+      answersForAllSections("partial"),
+      SAMPLE_EXAMINER_DATA,
+    );
+    expect(bytes.length).toBeGreaterThan(1000);
+    expect(String.fromCharCode(...bytes.slice(0, 5))).toBe("%PDF-");
+  });
+
+  it("renders with an empty package (no docs, evidence, or audit rows) without throwing", async () => {
+    const bytes = await generateExaminerPackage(dealership, [], {
+      documents: [],
+      evidence: [],
+      auditLog: [],
+    });
+    expect(bytes.length).toBeGreaterThan(1000);
+    expect(String.fromCharCode(...bytes.slice(0, 5))).toBe("%PDF-");
+  });
+
+  it("audit extract prints exactly the provided rows — never a fabricated one", () => {
+    const lines = examinerAuditLines(SAMPLE_EXAMINER_DATA.auditLog);
+    // One line per provided row — no more, no fewer.
+    expect(lines).toHaveLength(SAMPLE_EXAMINER_DATA.auditLog.length);
+    // Each provided row is represented, with its real action + actor.
+    expect(lines[0]).toContain("document.generate");
+    expect(lines[0]).toContain("qi@testmotors.com");
+    expect(lines[1]).toContain("compliance.save_section");
+    // No line references an action that was not in the input (no fabrication).
+    const joined = lines.join("\n");
+    expect(joined).not.toContain("risk.create");
+    expect(joined).not.toContain("policy.create");
+  });
+
+  it("audit extract yields a single honest line when there are no rows", () => {
+    const lines = examinerAuditLines([]);
+    expect(lines).toHaveLength(1);
+    expect(lines[0].toLowerCase()).toContain("no audit");
   });
 });
