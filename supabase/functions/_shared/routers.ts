@@ -1,7 +1,8 @@
 import { TRPCError } from 'npm:@trpc/server';
 import { z } from 'npm:zod';
 import * as db from './db.ts';
-import { storageGetSignedUrl, evidenceGetSignedUrl } from './storage.ts';
+import { storageGetSignedUrl, evidenceGetSignedUrl, evidenceGetSignedUploadUrl } from './storage.ts';
+import { deriveEvidenceStorageKey } from '../../../shared/evidence-storage.ts';
 import { stripeRouter } from './stripe-router.ts';
 import { pdfRouter } from './pdf-router.ts';
 import { ENV } from './env.ts';
@@ -398,6 +399,24 @@ const evidenceRouter = router({
     if (!scope) return [];
     return db.listEvidence(scope);
   }),
+  // Mint a short-lived signed URL the browser PUTs an evidence file to (PRD #31). The storage
+  // key is SERVER-derived from the resolved tenant scope (deriveEvidenceStorageKey) — the
+  // client-supplied fileName is sanitized to a bare segment and can never widen the path or
+  // reach another dealer's folder (path-traversal / cross-tenant write guard). No DB write and
+  // no audit here: the row + its audit land in evidence.create AFTER the browser uploads, and
+  // the returned `key` is what the client passes back as storagePath. Mirror of server/routers.ts.
+  getUploadUrl: protectedProcedure
+    .input(z.object({
+      fileName: z.string().min(1),
+      contentType: z.string().default('application/octet-stream'),
+    }))
+    .mutation(async ({ ctx, input }) => {
+      const scope = await resolveTenantScope(db, ctx.user.id, { createIfMissing: true });
+      if (!scope) throw new Error('Unable to resolve dealership');
+      const key = deriveEvidenceStorageKey(scope.dealershipId, input.fileName);
+      const { uploadUrl, token } = await evidenceGetSignedUploadUrl(key);
+      return { key, uploadUrl, token };
+    }),
   create: protectedProcedure
     .input(z.object({
       title: z.string().min(1),

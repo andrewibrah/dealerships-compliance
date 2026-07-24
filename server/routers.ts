@@ -11,7 +11,8 @@ import { rephraseQuestion } from '@shared/interview-phrasing';
 import { REQUIREMENT_CATALOG } from '@shared/requirements';
 import { computePosture, shouldRecordPosture } from '@shared/posture';
 import { ENV } from './_core/env';
-import { storageGetSignedUrl, evidenceGetSignedUrl } from './storage';
+import { storageGetSignedUrl, evidenceGetSignedUrl, evidenceGetSignedUploadUrl } from './storage';
+import { deriveEvidenceStorageKey } from '@shared/evidence-storage';
 import { pdfRouter } from './pdf-router';
 import { stripeRouter } from './stripe-router';
 
@@ -435,6 +436,27 @@ export const appRouter = router({
       if (!scope) return [];
       return db.listEvidence(scope);
     }),
+
+    // Mint a short-lived signed URL the browser PUTs an evidence file to (PRD #31). The storage
+    // key is SERVER-derived from the resolved tenant scope (deriveEvidenceStorageKey) — the
+    // client-supplied fileName is sanitized to a bare segment and can never widen the path or
+    // reach another dealer's folder (path-traversal / cross-tenant write guard). No DB write and
+    // no audit here: the row + its audit land in evidence.create AFTER the browser uploads, and
+    // the returned `key` is what the client passes back as storagePath. Mirrored in the Deno twin.
+    getUploadUrl: protectedProcedure
+      .input(
+        z.object({
+          fileName: z.string().min(1),
+          contentType: z.string().default('application/octet-stream'),
+        })
+      )
+      .mutation(async ({ ctx, input }) => {
+        const scope = await resolveTenantScope(db, ctx.user.id, { createIfMissing: true });
+        if (!scope) throw new Error('Unable to resolve dealership');
+        const key = deriveEvidenceStorageKey(scope.dealershipId, input.fileName);
+        const { uploadUrl, token } = await evidenceGetSignedUploadUrl(key);
+        return { key, uploadUrl, token };
+      }),
 
     create: protectedProcedure
       .input(
