@@ -45,6 +45,14 @@ export const ASSESSMENT_DISCLAIMER =
   'This assessment is generated software output, not legal or professional security advice. ' +
   'The dealership and its Qualified Individual remain responsible for their information security program.';
 
+/** App-chrome variant of the disclaimer (PRD #4) — second person, shown in the persistent footer
+ *  on every page. Same substance as ASSESSMENT_DISCLAIMER, phrased for the reader looking at the
+ *  UI rather than at a generated document. Centralized here so all disclaimer wording lives in one
+ *  place and can never silently drift. */
+export const APP_DISCLAIMER =
+  'This is generated software output, not legal or professional security advice. ' +
+  'Your dealership and its Qualified Individual remain responsible for your information security program.';
+
 export type DomainKey =
   | 'cloud_infrastructure'
   | 'access_identity'

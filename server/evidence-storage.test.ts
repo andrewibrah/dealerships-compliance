@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import {
   deriveEvidenceStorageKey,
+  isEvidenceKeyInDealershipScope,
   sanitizeEvidenceFileName,
 } from '@shared/evidence-storage';
 
@@ -60,5 +61,25 @@ describe('deriveEvidenceStorageKey', () => {
     const b = deriveEvidenceStorageKey(1, 'x.png');
     expect(a).not.toBe(b);
     expect(a.startsWith('evidence/1/')).toBe(true);
+  });
+});
+
+describe('isEvidenceKeyInDealershipScope (evidence.create storagePath guard)', () => {
+  it('accepts a path inside the caller dealership folder', () => {
+    expect(isEvidenceKeyInDealershipScope(42, 'evidence/42/abc-proof.pdf')).toBe(true);
+    // A server-derived key is always accepted by construction.
+    expect(isEvidenceKeyInDealershipScope(42, deriveEvidenceStorageKey(42, 'proof.pdf'))).toBe(true);
+  });
+
+  it("rejects a path pointing at another dealership's folder", () => {
+    expect(isEvidenceKeyInDealershipScope(42, 'evidence/9/steal.pdf')).toBe(false);
+    expect(isEvidenceKeyInDealershipScope(1, 'evidence/12/x.pdf')).toBe(false); // prefix-collision guard
+  });
+
+  it('rejects paths outside the evidence bucket or with no dealership segment', () => {
+    expect(isEvidenceKeyInDealershipScope(42, 'documents/42/wisp.pdf')).toBe(false);
+    expect(isEvidenceKeyInDealershipScope(42, '../evidence/42/x.pdf')).toBe(false);
+    expect(isEvidenceKeyInDealershipScope(42, 'evidence/42x/x.pdf')).toBe(false);
+    expect(isEvidenceKeyInDealershipScope(42, '')).toBe(false);
   });
 });

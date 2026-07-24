@@ -12,7 +12,8 @@ import { REQUIREMENT_CATALOG } from '@shared/requirements';
 import { computePosture, shouldRecordPosture } from '@shared/posture';
 import { ENV } from './_core/env';
 import { storageGetSignedUrl, evidenceGetSignedUrl, evidenceGetSignedUploadUrl } from './storage';
-import { deriveEvidenceStorageKey } from '@shared/evidence-storage';
+import { deriveEvidenceStorageKey, isEvidenceKeyInDealershipScope } from '@shared/evidence-storage';
+import { computePolicyTransition } from '@shared/policy-lifecycle';
 import { pdfRouter } from './pdf-router';
 import { stripeRouter } from './stripe-router';
 
@@ -472,6 +473,11 @@ export const appRouter = router({
       .mutation(async ({ ctx, input }) => {
         const scope = await resolveTenantScope(db, ctx.user.id, { createIfMissing: true });
         if (!scope) throw new Error('Unable to resolve dealership');
+        // Harden: the client echoes back the storagePath it uploaded to; reject any path outside
+        // this dealership's own evidence folder so a row can never point at another tenant's object.
+        if (!isEvidenceKeyInDealershipScope(scope.dealershipId, input.storagePath)) {
+          throw new Error('Forbidden: evidence storagePath is outside this dealership scope');
+        }
         const item = await db.createEvidence(scope, {
           title: input.title,
           description: input.description,
@@ -646,19 +652,18 @@ export const appRouter = router({
       return db.listPolicies(scope);
     }),
 
+    // Lifecycle fields (status/version/adoptedAt) are NOT settable here — they flow ONLY through
+    // `transition` (the validated state machine). A created policy is always a fresh draft; this
+    // keeps the set-once adoptedAt + no-backward-transition guarantees enforceable end-to-end.
     create: protectedProcedure
       .input(
         z.object({
           policyType: z.string().min(1),
           title: z.string().min(1),
-          status: z.enum(['draft', 'in_review', 'approved', 'adopted', 'archived']).default('draft'),
-          version: z.number().int().min(1).default(1),
           content: z.string().default(''),
           storagePath: z.string().nullable().optional(),
           requirementId: z.number().int().nullable().optional(),
-          approvedBy: z.string().default(''),
-          adoptedAt: z.coerce.date().nullable().optional(),
-        })
+        }).strict()
       )
       .mutation(async ({ ctx, input }) => {
         const scope = await resolveTenantScope(db, ctx.user.id, { createIfMissing: true });
@@ -666,13 +671,13 @@ export const appRouter = router({
         const policy = await db.createPolicy(scope, {
           policyType: input.policyType,
           title: input.title,
-          status: input.status,
-          version: input.version,
+          status: 'draft',
+          version: 1,
           content: input.content,
           storagePath: input.storagePath ?? null,
           requirementId: input.requirementId ?? null,
-          approvedBy: input.approvedBy,
-          adoptedAt: input.adoptedAt ?? null,
+          approvedBy: '',
+          adoptedAt: null,
         });
         await db.appendAuditLog({
           action: AUDIT_ACTIONS.policyCreate,
@@ -680,25 +685,25 @@ export const appRouter = router({
           entityType: 'policy',
           entityId: policy.id,
           dealershipId: scope.dealershipId,
-          metadata: { policyType: input.policyType, title: policy.title, status: input.status },
+          metadata: { policyType: input.policyType, title: policy.title, status: 'draft' },
         });
         return policy;
       }),
 
+    // Content-only edit. Lifecycle fields (status/version/adoptedAt) are intentionally NOT
+    // accepted — status changes must go through `transition` so adoptedAt stays set-once and no
+    // backward/skip transition is possible via the API.
     update: protectedProcedure
       .input(
         z.object({
           id: z.number().int(),
           policyType: z.string().min(1).optional(),
           title: z.string().min(1).optional(),
-          status: z.enum(['draft', 'in_review', 'approved', 'adopted', 'archived']).optional(),
-          version: z.number().int().min(1).optional(),
           content: z.string().optional(),
           storagePath: z.string().nullable().optional(),
           requirementId: z.number().int().nullable().optional(),
           approvedBy: z.string().optional(),
-          adoptedAt: z.coerce.date().nullable().optional(),
-        })
+        }).strict()
       )
       .mutation(async ({ ctx, input }) => {
         const scope = await resolveTenantScope(db, ctx.user.id);
@@ -713,6 +718,46 @@ export const appRouter = router({
           entityId: id,
           dealershipId: scope.dealershipId,
           metadata: { fields: Object.keys(changes) },
+        });
+        return policy;
+      }),
+
+    // Approval workflow (PRD #26/#41). Enforce the lifecycle SERVER-SIDE via the deterministic
+    // state machine in shared/policy-lifecycle.ts: it rejects any disallowed/backward transition,
+    // bumps version when a previously-approved policy re-enters an editable state, and stamps
+    // adoptedAt exactly once (adopted is terminal, so it can never be overwritten). Tenant-scoped
+    // and audited as a policyUpdate carrying from/to status.
+    transition: protectedProcedure
+      .input(
+        z.object({
+          id: z.number().int(),
+          toStatus: z.enum(['draft', 'in_review', 'approved', 'adopted', 'archived']),
+        })
+      )
+      .mutation(async ({ ctx, input }) => {
+        const scope = await resolveTenantScope(db, ctx.user.id);
+        if (!scope) throw new Error('No dealership found');
+        const existing = (await db.listPolicies(scope)).find((p) => p.id === input.id);
+        if (!existing) throw new Error('Policy not found');
+        const changes = computePolicyTransition(
+          { status: existing.status, version: existing.version, adoptedAt: existing.adoptedAt },
+          input.toStatus,
+          new Date(),
+        );
+        const policy = await db.updatePolicy(scope, input.id, changes);
+        if (!policy) throw new Error('Policy not found');
+        await db.appendAuditLog({
+          action: AUDIT_ACTIONS.policyUpdate,
+          actor: { userId: ctx.user.id, email: ctx.user.email },
+          entityType: 'policy',
+          entityId: input.id,
+          dealershipId: scope.dealershipId,
+          metadata: {
+            transition: true,
+            fromStatus: existing.status,
+            toStatus: input.toStatus,
+            version: changes.version,
+          },
         });
         return policy;
       }),

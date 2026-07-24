@@ -12,10 +12,12 @@ import Summary from "./pages/Summary";
 import Architecture from "./pages/Architecture";
 import Wizard from "./pages/Wizard";
 import Documents from "./pages/Documents";
+import Policies from "./pages/Policies";
 import Evidence from "./pages/Evidence";
 import Tasks from "./pages/Tasks";
 import Pricing from "./pages/Pricing";
 import Profile from "./pages/Profile";
+import AppFooter from "./components/AppFooter";
 
 const base = import.meta.env.BASE_URL.replace(/\/$/, '');
 
@@ -32,6 +34,7 @@ function AppRouter() {
         <Route path={"/profile"} component={Profile} />
         <Route path={"/wizard"} component={Wizard} />
         <Route path={"/documents"} component={Documents} />
+        <Route path={"/policies"} component={Policies} />
         <Route path={"/evidence"} component={Evidence} />
         <Route path={"/tasks"} component={Tasks} />
         <Route path={"/pricing"} component={Pricing} />
@@ -56,6 +59,7 @@ function App() {
         <TooltipProvider>
           <Toaster />
           <AppRouter />
+          <AppFooter />
         </TooltipProvider>
       </ThemeProvider>
     </ErrorBoundary>

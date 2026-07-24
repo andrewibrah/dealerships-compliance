@@ -1,6 +1,6 @@
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
-import { AlertCircle, Download, FileText, Lock } from "lucide-react";
+import { AlertCircle, Download, FileText, Lock, ShieldCheck } from "lucide-react";
 import { useState } from "react";
 import { useLocation } from "wouter";
 import { useAuth } from "@/hooks/useAuth";
@@ -158,9 +158,15 @@ export default function Documents() {
     <div className="min-h-screen bg-gradient-to-br from-slate-900 via-slate-800 to-slate-900">
       {/* Header */}
       <div className="border-b border-slate-700 bg-slate-900/50 backdrop-blur">
-        <div className="container mx-auto px-4 py-6">
-          <h1 className="text-3xl font-bold text-white">Document Vault</h1>
-          <p className="text-slate-400">Generate and download your compliance documents</p>
+        <div className="container mx-auto px-4 py-6 flex items-center justify-between gap-4">
+          <div>
+            <h1 className="text-3xl font-bold text-white">Document Vault</h1>
+            <p className="text-slate-400">Generate and download your compliance documents</p>
+          </div>
+          <Button variant="outline" onClick={() => setLocation("/policies")}>
+            <ShieldCheck size={16} className="mr-2" aria-hidden="true" />
+            Policy approvals
+          </Button>
         </div>
       </div>
 

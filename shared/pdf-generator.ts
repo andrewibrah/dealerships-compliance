@@ -270,6 +270,7 @@ export async function generateWISP(
 
   w.text("WRITTEN INFORMATION SECURITY PROGRAM (WISP)", { size: 17, bold: true, color: NAVY });
   w.text("FTC Safeguards Rule — 16 CFR Part 314", { size: 11, color: SLATE, gapAfter: 12 });
+  writeDisclaimer(w);
 
   w.heading("Covered Entity");
   w.text(`Dealership: ${dealership.name || "Not provided"}`, { bold: true });
@@ -368,6 +369,7 @@ export async function generateWISP(
   );
 
   w.spacer(10);
+  writeDisclaimer(w);
   w.text("Confidential — for internal, board, auditor, and regulator use.", { size: 8, color: SLATE });
   w.text(`Generated ${new Date().toLocaleString()}`, { size: 8, color: SLATE });
 
@@ -396,6 +398,7 @@ export async function generateBoardReport(
     color: SLATE,
     gapAfter: 12,
   });
+  writeDisclaimer(w);
 
   w.text(`Dealership: ${dealership.name || "Not provided"}`, { bold: true });
   w.text(`Report date: ${new Date().toLocaleDateString()}`);
@@ -462,6 +465,7 @@ export async function generateBoardReport(
   );
 
   w.spacer(10);
+  writeDisclaimer(w);
   w.text("Confidential — intended for board members and the Qualified Individual.", {
     size: 8,
     color: SLATE,

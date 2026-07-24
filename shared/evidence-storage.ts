@@ -36,3 +36,18 @@ export function deriveEvidenceStorageKey(
 ): string {
   return `evidence/${dealershipId}/${randomId}-${sanitizeEvidenceFileName(fileName)}`;
 }
+
+/**
+ * Guard for evidence.create (both runtimes). The client echoes back the storagePath it uploaded
+ * to, so before persisting a row that points at that object the server must confirm the path is
+ * confined to THIS dealership's own folder. Returns false for any path that does not begin with
+ * `evidence/<dealershipId>/` — closing the gap where a tenant could store a row pointing at another
+ * dealer's evidence path. The trailing slash is required so `evidence/1/` can never match
+ * `evidence/12/...`.
+ */
+export function isEvidenceKeyInDealershipScope(
+  dealershipId: number,
+  storagePath: string,
+): boolean {
+  return typeof storagePath === 'string' && storagePath.startsWith(`evidence/${dealershipId}/`);
+}
