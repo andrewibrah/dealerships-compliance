@@ -349,6 +349,27 @@ export const attestations = pgTable('attestations', {
   }),
 ]);
 
+// Posture history — continuous compliance-posture tracking (PRD #33). A TENANT-SCOPED,
+// append-only time series: one row each time the dealer's OVERALL score changes (the write
+// path dedups on overall_score so per-answer saveSection calls don't explode the table).
+// overall_score + risk_level + section_scores are all DERIVED server-side from the same
+// deterministic derivation the Dashboard runs (shared/derivation.ts, applicability-aware) —
+// never an LLM. RLS lives in the 0011 migration (dealership-scoped, all verbs — mirroring
+// controls/risks in 0005).
+export const postureSnapshots = pgTable('posture_snapshots', {
+  id: integer('id').primaryKey().generatedAlwaysAsIdentity(),
+  dealershipId: integer('dealership_id').notNull().references(() => dealerships.id),
+  overallScore: integer('overall_score').notNull(),
+  // risk_level is 'critical' | 'high' | 'medium' | 'low' (derivation's four-band scale, which
+  // includes 'critical' that riskLevelEnum lacks) — plain text, not an enum, so it can't drift.
+  riskLevel: text('risk_level').notNull().default(''),
+  sectionScores: jsonb('section_scores').notNull().default({}),
+  createdAt: timestamp('created_at').notNull().defaultNow(),
+}, (t) => [
+  index('posture_snapshots_dealership_id_idx').on(t.dealershipId),
+  index('posture_snapshots_created_at_idx').on(t.createdAt),
+]);
+
 // Append-only, tamper-evident audit trail (PRD #34 / #51). An immutable who/what/when
 // record of auth events and every state-changing mutation. Immutability + the SHA-256
 // hash chain (prev_hash -> row_hash) are enforced by the DB (see 0004 migration), not
@@ -404,5 +425,7 @@ export type DataFlow = typeof dataFlows.$inferSelect;
 export type InsertDataFlow = typeof dataFlows.$inferInsert;
 export type Attestation = typeof attestations.$inferSelect;
 export type InsertAttestation = typeof attestations.$inferInsert;
+export type PostureSnapshot = typeof postureSnapshots.$inferSelect;
+export type InsertPostureSnapshot = typeof postureSnapshots.$inferInsert;
 export type AuditLogEntry = typeof auditLog.$inferSelect;
 export type InsertAuditLogEntry = typeof auditLog.$inferInsert;

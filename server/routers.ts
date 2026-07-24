@@ -8,6 +8,8 @@ import { deriveControlStatus, type AnswerValue } from '@shared/controls';
 import { deriveTasksFromControls } from '@shared/task-derivation';
 import { getAllQuestions } from '@shared/safeguards-questions';
 import { rephraseQuestion } from '@shared/interview-phrasing';
+import { REQUIREMENT_CATALOG } from '@shared/requirements';
+import { computePosture, shouldRecordPosture } from '@shared/posture';
 import { ENV } from './_core/env';
 import { storageGetSignedUrl, evidenceGetSignedUrl } from './storage';
 import { pdfRouter } from './pdf-router';
@@ -45,6 +47,37 @@ async function upsertDerivedControls(
     controlsUpserted += 1;
   }
   return controlsUpserted;
+}
+
+// Continuous posture tracking (PRD #33). After the answers write, recompute the dealer's overall
+// posture the SAME way the Dashboard does (applicability-aware derivation over the global catalog)
+// and append a history row ONLY when the overall score changed vs the latest snapshot (dedup in
+// shared/posture.ts) — so per-answer saves don't flood the table. Additive + audited. Mirrored in
+// supabase/functions/_shared/routers.ts.
+async function recordPostureSnapshot(
+  scope: TenantScope,
+  profile: { consumerCount: number | null },
+  actor: { userId: string; email: string },
+): Promise<void> {
+  const rows = await db.getAllComplianceAnswers(scope);
+  const answers: Record<string, AnswerValue> = {};
+  for (const row of rows) Object.assign(answers, (row.answers as Record<string, AnswerValue>) ?? {});
+  const posture = computePosture(REQUIREMENT_CATALOG, answers, profile);
+  const latest = await db.getLatestPostureSnapshot(scope);
+  if (!shouldRecordPosture(latest?.overallScore ?? null, posture.overallScore)) return;
+  const snapshot = await db.createPostureSnapshot(scope, {
+    overallScore: posture.overallScore,
+    riskLevel: posture.riskLevel,
+    sectionScores: posture.sectionScores,
+  });
+  await db.appendAuditLog({
+    action: AUDIT_ACTIONS.postureSnapshot,
+    actor,
+    entityType: 'posture_snapshot',
+    entityId: snapshot.id,
+    dealershipId: scope.dealershipId,
+    metadata: { overallScore: posture.overallScore, riskLevel: posture.riskLevel },
+  });
 }
 
 export const appRouter = router({
@@ -190,6 +223,11 @@ export const appRouter = router({
           dealershipId: scope.dealershipId,
           metadata: { section: input.section, sectionName: input.sectionName, controlsUpserted },
         });
+        await recordPostureSnapshot(
+          scope,
+          { consumerCount: scope.dealership.consumerCount },
+          { userId: ctx.user.id, email: ctx.user.email },
+        );
         return { success: true };
       }),
 
@@ -228,8 +266,22 @@ export const appRouter = router({
             controlsUpserted,
           },
         });
+        await recordPostureSnapshot(
+          scope,
+          { consumerCount: scope.dealership.consumerCount },
+          { userId: ctx.user.id, email: ctx.user.email },
+        );
         return { success: true };
       }),
+  }),
+
+  // Posture history — a tenant-scoped time series of overall compliance score (PRD #33).
+  posture: router({
+    list: protectedProcedure.query(async ({ ctx }) => {
+      const scope = await resolveTenantScope(db, ctx.user.id);
+      if (!scope) return [];
+      return db.listPostureSnapshots(scope);
+    }),
   }),
 
   // Optional conversational phrasing (PRD #11/#39) — DISPLAY ONLY. A QUERY: it writes

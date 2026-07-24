@@ -12,6 +12,8 @@ import { deriveControlStatus, type AnswerValue } from '../../../shared/controls.
 import { deriveTasksFromControls } from '../../../shared/task-derivation.ts';
 import { getAllQuestions } from '../../../shared/safeguards-questions.ts';
 import { rephraseQuestion } from '../../../shared/interview-phrasing.ts';
+import { REQUIREMENT_CATALOG } from '../../../shared/requirements.ts';
+import { computePosture, shouldRecordPosture } from '../../../shared/posture.ts';
 
 // JSONB -> Control cutover (PRD #5). Additively project a saved section's answers onto derived
 // Control rows — one per answered requirement present in the GLOBAL catalog. Runs AFTER the
@@ -38,6 +40,36 @@ async function upsertDerivedControls(
     controlsUpserted += 1;
   }
   return controlsUpserted;
+}
+
+// Continuous posture tracking (PRD #33). After the answers write, recompute the dealer's overall
+// posture the SAME way the Dashboard does (applicability-aware derivation) and append a history
+// row ONLY when the overall score changed vs the latest snapshot (dedup in shared/posture.ts).
+// Additive + audited. Mirror of server/routers.ts recordPostureSnapshot.
+async function recordPostureSnapshot(
+  scope: TenantScope,
+  profile: { consumerCount: number | null },
+  actor: { userId: string; email: string },
+): Promise<void> {
+  const rows = await db.getAllComplianceAnswers(scope);
+  const answers: Record<string, AnswerValue> = {};
+  for (const row of rows) Object.assign(answers, (row.answers as Record<string, AnswerValue>) ?? {});
+  const posture = computePosture(REQUIREMENT_CATALOG, answers, profile);
+  const latest = await db.getLatestPostureSnapshot(scope);
+  if (!shouldRecordPosture(latest?.overallScore ?? null, posture.overallScore)) return;
+  const snapshot = await db.createPostureSnapshot(scope, {
+    overallScore: posture.overallScore,
+    riskLevel: posture.riskLevel,
+    sectionScores: posture.sectionScores,
+  });
+  await db.appendAuditLog({
+    action: AUDIT_ACTIONS.postureSnapshot,
+    actor,
+    entityType: 'posture_snapshot',
+    entityId: snapshot.id,
+    dealershipId: scope.dealershipId,
+    metadata: { overallScore: posture.overallScore, riskLevel: posture.riskLevel },
+  });
 }
 
 const authRouter = router({
@@ -170,6 +202,11 @@ const complianceRouter = router({
         dealershipId: scope.dealershipId,
         metadata: { section: input.section, sectionName: input.sectionName, controlsUpserted },
       });
+      await recordPostureSnapshot(
+        scope,
+        { consumerCount: scope.dealership.consumerCount },
+        { userId: ctx.user.id, email: ctx.user.email },
+      );
       return row;
     }),
   saveSection: protectedProcedure
@@ -202,8 +239,23 @@ const complianceRouter = router({
         dealershipId: scope.dealershipId,
         metadata: { section: input.section, sectionName: input.sectionName, completed, controlsUpserted },
       });
+      await recordPostureSnapshot(
+        scope,
+        { consumerCount: scope.dealership.consumerCount },
+        { userId: ctx.user.id, email: ctx.user.email },
+      );
       return row;
     }),
+});
+
+// Posture history — a tenant-scoped time series of overall compliance score (PRD #33).
+// Mirror of server/routers.ts posture router.
+const postureRouter = router({
+  list: protectedProcedure.query(async ({ ctx }) => {
+    const scope = await resolveTenantScope(db, ctx.user.id);
+    if (!scope) return [];
+    return db.listPostureSnapshots(scope);
+  }),
 });
 
 // Optional conversational phrasing (PRD #11/#39) — DISPLAY ONLY. A QUERY: it writes nothing
@@ -904,6 +956,7 @@ export const appRouter = router({
   auth: authRouter,
   dealership: dealershipRouter,
   compliance: complianceRouter,
+  posture: postureRouter,
   interview: interviewRouter,
   requirements: requirementsRouter,
   controls: controlsRouter,

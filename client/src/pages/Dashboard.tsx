@@ -44,6 +44,9 @@ export default function Dashboard() {
   const tasksQuery = trpc.tasks.list.useQuery(undefined, {
     enabled: isAuthenticated,
   });
+  const postureQuery = trpc.posture.list.useQuery(undefined, {
+    enabled: isAuthenticated,
+  });
   const isLoadingScores = isAuthenticated && (answersQuery.isLoading || dealershipQuery.isLoading);
 
   // Open remediation tasks = anything not resolved (PRD #38 dashboard surfacing). Additive:
@@ -262,6 +265,63 @@ export default function Dashboard() {
               </div>
             </div>
           </div>
+        </Card>
+
+        {/* Compliance Posture Trend (PRD #33) — overall score over time from posture_snapshots. */}
+        <Card className="bg-slate-800 border-slate-700 p-8 mb-12">
+          <div className="flex items-center gap-3 mb-6">
+            <TrendingUp className="text-amber-500" size={24} aria-hidden="true" />
+            <h2 className="text-2xl font-bold text-white">Compliance Posture Trend</h2>
+          </div>
+          {(() => {
+            const history = (postureQuery.data ?? []).map((s) => ({
+              score: s.overallScore,
+              at: new Date(s.createdAt).toLocaleDateString(),
+            }));
+            if (history.length < 2) {
+              return (
+                <p className="text-slate-400 text-sm">
+                  Your posture history builds as you update the assessment. Once your overall score
+                  changes, the trend will chart here.
+                </p>
+              );
+            }
+            const w = 600;
+            const h = 120;
+            const pad = 8;
+            const xs = (i: number) => pad + (i * (w - 2 * pad)) / (history.length - 1);
+            const ys = (v: number) => h - pad - (v / 100) * (h - 2 * pad);
+            const points = history.map((p, i) => `${xs(i)},${ys(p.score)}`).join(" ");
+            const first = history[0];
+            const last = history[history.length - 1];
+            const label = `Compliance posture trend across ${history.length} snapshots, from ${first.score}% on ${first.at} to ${last.score}% on ${last.at}.`;
+            return (
+              <div>
+                <svg
+                  viewBox={`0 0 ${w} ${h}`}
+                  className="w-full h-32"
+                  role="img"
+                  aria-label={label}
+                  preserveAspectRatio="none"
+                >
+                  <polyline
+                    points={points}
+                    fill="none"
+                    stroke="#f59e0b"
+                    strokeWidth={2}
+                    vectorEffect="non-scaling-stroke"
+                  />
+                  {history.map((p, i) => (
+                    <circle key={i} cx={xs(i)} cy={ys(p.score)} r={2.5} fill="#f59e0b" />
+                  ))}
+                </svg>
+                <div className="flex justify-between text-xs text-slate-400 mt-2">
+                  <span>{first.at}: {first.score}%</span>
+                  <span>{last.at}: {last.score}%</span>
+                </div>
+              </div>
+            );
+          })()}
         </Card>
 
         {/* Section Scores Grid */}
