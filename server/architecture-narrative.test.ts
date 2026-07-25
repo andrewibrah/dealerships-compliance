@@ -2,10 +2,15 @@ import { describe, it, expect, vi } from 'vitest';
 import {
   buildArchitectureNarrativePrompt,
   narrateDomain,
-  NARRATIVE_MODEL,
-  ANTHROPIC_MESSAGES_URL,
   type DomainNarrativeInput,
 } from '@shared/architecture-narrative';
+// Transport constants moved to the shared provider when OpenAI support landed. These tests drive
+// the Anthropic path explicitly (they mock its response shape); the OpenAI path and provider
+// precedence are covered in server/llm-provider.test.ts.
+import {
+  ANTHROPIC_MODEL as NARRATIVE_MODEL,
+  ANTHROPIC_MESSAGES_URL,
+} from '@shared/llm-provider';
 
 const INPUT: DomainNarrativeInput = {
   domainTitle: 'Access & Identity Management',
@@ -41,13 +46,13 @@ describe('buildArchitectureNarrativePrompt — pure, injection-resistant', () =>
 describe('narrateDomain — passthrough + display-only guarantee', () => {
   it('returns the deterministic narrative UNCHANGED when no API key is configured', async () => {
     const noFetch = vi.fn();
-    const result = await narrateDomain(INPUT, { apiKey: '', fetchImpl: noFetch as unknown as typeof fetch });
+    const result = await narrateDomain(INPUT, { anthropicApiKey: '', fetchImpl: noFetch as unknown as typeof fetch });
     expect(result).toEqual({ text: INPUT.deterministicNarrative });
     expect(noFetch).not.toHaveBeenCalled(); // passthrough must not touch the network
   });
 
   it('also passes through for a whitespace-only key', async () => {
-    const result = await narrateDomain(INPUT, { apiKey: '   ' });
+    const result = await narrateDomain(INPUT, { anthropicApiKey: '   ' });
     expect(result).toEqual({ text: INPUT.deterministicNarrative });
   });
 
@@ -60,7 +65,7 @@ describe('narrateDomain — passthrough + display-only guarantee', () => {
       }),
     );
     const result = await narrateDomain(INPUT, {
-      apiKey: 'sk-test',
+      anthropicApiKey: 'sk-test',
       fetchImpl: fetchImpl as unknown as typeof fetch,
     });
 
@@ -78,13 +83,13 @@ describe('narrateDomain — passthrough + display-only guarantee', () => {
 
   it('falls back to the deterministic narrative on a non-2xx response', async () => {
     const fetchImpl = vi.fn(async () => new Response('nope', { status: 500 }));
-    const result = await narrateDomain(INPUT, { apiKey: 'sk-test', fetchImpl: fetchImpl as unknown as typeof fetch });
+    const result = await narrateDomain(INPUT, { anthropicApiKey: 'sk-test', fetchImpl: fetchImpl as unknown as typeof fetch });
     expect(result).toEqual({ text: INPUT.deterministicNarrative });
   });
 
   it('falls back when the model returns empty content', async () => {
     const fetchImpl = vi.fn(async () => new Response(JSON.stringify({ content: [] }), { status: 200 }));
-    const result = await narrateDomain(INPUT, { apiKey: 'sk-test', fetchImpl: fetchImpl as unknown as typeof fetch });
+    const result = await narrateDomain(INPUT, { anthropicApiKey: 'sk-test', fetchImpl: fetchImpl as unknown as typeof fetch });
     expect(result).toEqual({ text: INPUT.deterministicNarrative });
   });
 
@@ -92,7 +97,7 @@ describe('narrateDomain — passthrough + display-only guarantee', () => {
     const fetchImpl = vi.fn(async () => {
       throw new Error('network down');
     });
-    const result = await narrateDomain(INPUT, { apiKey: 'sk-test', fetchImpl: fetchImpl as unknown as typeof fetch });
+    const result = await narrateDomain(INPUT, { anthropicApiKey: 'sk-test', fetchImpl: fetchImpl as unknown as typeof fetch });
     expect(result).toEqual({ text: INPUT.deterministicNarrative });
   });
 });

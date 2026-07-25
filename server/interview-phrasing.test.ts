@@ -1,10 +1,12 @@
 import { describe, it, expect, vi } from 'vitest';
+import { buildRephrasePrompt, rephraseQuestion } from '@shared/interview-phrasing';
+// Transport constants moved to the shared provider when OpenAI support landed. These tests drive
+// the Anthropic path explicitly (they mock its response shape); the OpenAI path and provider
+// precedence are covered in server/llm-provider.test.ts.
 import {
-  buildRephrasePrompt,
-  rephraseQuestion,
-  REPHRASE_MODEL,
+  ANTHROPIC_MODEL as REPHRASE_MODEL,
   ANTHROPIC_MESSAGES_URL,
-} from '@shared/interview-phrasing';
+} from '@shared/llm-provider';
 
 const QUESTION = {
   questionText: 'Has your dealership designated a Qualified Individual?',
@@ -39,14 +41,14 @@ describe('buildRephrasePrompt — pure, injection-resistant', () => {
 describe('rephraseQuestion — passthrough + display-only guarantee', () => {
   it('returns the ORIGINAL question text when no API key is configured', async () => {
     const noFetch = vi.fn();
-    const result = await rephraseQuestion(QUESTION, { apiKey: '', fetchImpl: noFetch as unknown as typeof fetch });
+    const result = await rephraseQuestion(QUESTION, { anthropicApiKey: '', fetchImpl: noFetch as unknown as typeof fetch });
     expect(result).toEqual({ text: QUESTION.questionText });
     // Passthrough must not touch the network.
     expect(noFetch).not.toHaveBeenCalled();
   });
 
   it('also passes through for a whitespace-only key', async () => {
-    const result = await rephraseQuestion(QUESTION, { apiKey: '   ' });
+    const result = await rephraseQuestion(QUESTION, { anthropicApiKey: '   ' });
     expect(result).toEqual({ text: QUESTION.questionText });
   });
 
@@ -57,7 +59,7 @@ describe('rephraseQuestion — passthrough + display-only guarantee', () => {
         { status: 200, headers: { 'content-type': 'application/json' } },
       ),
     );
-    const result = await rephraseQuestion(QUESTION, { apiKey: 'sk-test', fetchImpl: fetchImpl as unknown as typeof fetch });
+    const result = await rephraseQuestion(QUESTION, { anthropicApiKey: 'sk-test', fetchImpl: fetchImpl as unknown as typeof fetch });
 
     expect(fetchImpl).toHaveBeenCalledOnce();
     const [url, init] = fetchImpl.mock.calls[0];
@@ -74,7 +76,7 @@ describe('rephraseQuestion — passthrough + display-only guarantee', () => {
 
   it('falls back to the original text on a non-2xx response', async () => {
     const fetchImpl = vi.fn(async () => new Response('nope', { status: 500 }));
-    const result = await rephraseQuestion(QUESTION, { apiKey: 'sk-test', fetchImpl: fetchImpl as unknown as typeof fetch });
+    const result = await rephraseQuestion(QUESTION, { anthropicApiKey: 'sk-test', fetchImpl: fetchImpl as unknown as typeof fetch });
     expect(result).toEqual({ text: QUESTION.questionText });
   });
 
@@ -82,7 +84,7 @@ describe('rephraseQuestion — passthrough + display-only guarantee', () => {
     const fetchImpl = vi.fn(async () =>
       new Response(JSON.stringify({ content: [] }), { status: 200 }),
     );
-    const result = await rephraseQuestion(QUESTION, { apiKey: 'sk-test', fetchImpl: fetchImpl as unknown as typeof fetch });
+    const result = await rephraseQuestion(QUESTION, { anthropicApiKey: 'sk-test', fetchImpl: fetchImpl as unknown as typeof fetch });
     expect(result).toEqual({ text: QUESTION.questionText });
   });
 
@@ -90,7 +92,7 @@ describe('rephraseQuestion — passthrough + display-only guarantee', () => {
     const fetchImpl = vi.fn(async () => {
       throw new Error('network down');
     });
-    const result = await rephraseQuestion(QUESTION, { apiKey: 'sk-test', fetchImpl: fetchImpl as unknown as typeof fetch });
+    const result = await rephraseQuestion(QUESTION, { anthropicApiKey: 'sk-test', fetchImpl: fetchImpl as unknown as typeof fetch });
     expect(result).toEqual({ text: QUESTION.questionText });
   });
 });

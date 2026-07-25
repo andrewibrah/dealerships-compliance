@@ -17,9 +17,8 @@
 // wrapped in an explicit delimiter and the model is told to treat it as data to ignore, never as
 // instructions. The output is display-only regardless of what the model returns.
 
-export const NARRATIVE_MODEL = 'claude-sonnet-5';
-export const ANTHROPIC_MESSAGES_URL = 'https://api.anthropic.com/v1/messages';
-export const ANTHROPIC_VERSION = '2023-06-01';
+import { callLlmText, type LlmCredentials } from './llm-provider.ts';
+
 export const NARRATIVE_MAX_TOKENS = 400;
 
 export interface DomainNarrativeInput {
@@ -77,55 +76,32 @@ export function buildArchitectureNarrativePrompt(input: DomainNarrativeInput): {
   return { system, user: parts.join('\n\n') };
 }
 
-/** Extract the first text block from an Anthropic Messages API response, defensively. */
-function extractText(data: unknown): string {
-  if (!data || typeof data !== 'object') return '';
-  const content = (data as { content?: unknown }).content;
-  if (!Array.isArray(content)) return '';
-  for (const block of content) {
-    if (block && typeof block === 'object' && (block as { type?: string }).type === 'text') {
-      const text = (block as { text?: unknown }).text;
-      if (typeof text === 'string') return text;
-    }
-  }
-  return '';
-}
 
 /**
  * Narrate one domain's deterministic findings into expert prose. Returns { text } ONLY. With no
- * apiKey (the default in this deployment) or on any error, returns the deterministic template
- * narrative UNCHANGED (passthrough). `fetchImpl` is injectable purely so tests can drive the
- * with-key path without a real call.
+ * usable API key (passthrough) or on any error — non-2xx, malformed body, network throw — returns
+ * the deterministic template narrative UNCHANGED. `fetchImpl` is injectable purely so tests can
+ * drive the with-key path without a real call.
  */
 export async function narrateDomain(
   input: DomainNarrativeInput,
-  opts: { apiKey?: string | null; fetchImpl?: typeof fetch } = {},
+  opts: LlmCredentials & { fetchImpl?: typeof fetch } = {},
 ): Promise<DomainNarrativeResult> {
-  const apiKey = opts.apiKey?.trim();
-  if (!apiKey) return { text: input.deterministicNarrative }; // passthrough — deterministic template
-
-  const doFetch = opts.fetchImpl ?? fetch;
-  const { system, user } = buildArchitectureNarrativePrompt(input);
+  // The ENTIRE body is guarded, including prompt building: this runs inside PDF generation, so a
+  // malformed input must degrade to the deterministic narrative rather than fail the document.
   try {
-    const response = await doFetch(ANTHROPIC_MESSAGES_URL, {
-      method: 'POST',
-      headers: {
-        'content-type': 'application/json',
-        'x-api-key': apiKey,
-        'anthropic-version': ANTHROPIC_VERSION,
+    const { system, user } = buildArchitectureNarrativePrompt(input);
+    const text = await callLlmText(
+      { system, user, maxTokens: NARRATIVE_MAX_TOKENS },
+      {
+        credentials: { openaiApiKey: opts.openaiApiKey, anthropicApiKey: opts.anthropicApiKey },
+        fetchImpl: opts.fetchImpl,
       },
-      body: JSON.stringify({
-        model: NARRATIVE_MODEL,
-        max_tokens: NARRATIVE_MAX_TOKENS,
-        system,
-        messages: [{ role: 'user', content: user }],
-      }),
-    });
-    if (!response.ok) return { text: input.deterministicNarrative };
-    const data = await response.json();
-    const text = extractText(data).trim();
+    );
+    // callLlmText yields '' for every failure mode, so this covers no-key, non-2xx, empty body,
+    // and network throws — the deterministic findings always survive.
     return { text: text || input.deterministicNarrative };
   } catch {
-    return { text: input.deterministicNarrative }; // never throw into generation
+    return { text: input.deterministicNarrative };
   }
 }

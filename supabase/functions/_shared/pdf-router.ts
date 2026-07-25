@@ -67,7 +67,7 @@ async function domainNarratives(
         untrustedContext:
           domain.key === 'vendor' || domain.key === 'ai_emerging' ? dmsVendor || undefined : undefined,
       },
-      { apiKey: ENV.anthropicApiKey },
+      { openaiApiKey: ENV.openaiApiKey, anthropicApiKey: ENV.anthropicApiKey },
     );
     out[domain.key] = res.text;
   }

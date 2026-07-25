@@ -292,7 +292,7 @@ const interviewRouter = router({
       if (!question) return { text: '' };
       return rephraseQuestion(
         { questionText: question.text, hint: question.hint },
-        { apiKey: ENV.anthropicApiKey },
+        { openaiApiKey: ENV.openaiApiKey, anthropicApiKey: ENV.anthropicApiKey },
       );
     }),
 });
