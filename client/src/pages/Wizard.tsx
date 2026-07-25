@@ -365,7 +365,7 @@ export default function Wizard() {
                         role="radiogroup"
                         aria-labelledby={`q-${question.id}-label`}
                         aria-describedby={question.hint ? `q-${question.id}-hint` : undefined}
-                        className="flex gap-4"
+                        className="flex flex-wrap gap-4"
                       >
                         {options.map(({ value, label, selectedClass }) => {
                           const isOn = selected === value;

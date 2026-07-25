@@ -59,6 +59,10 @@ export const dealerships = pgTable('dealerships', {
   rooftopCount: integer('rooftop_count').notNull().default(1),
   qualifiedIndividual: text('qualified_individual').notNull().default(''),
   qiEmail: varchar('qi_email', { length: 320 }).notNull().default(''),
+  // White-label branding (PRD #45): optional tenant logo URL shown in the app header. Nullable —
+  // unset renders the dealership name only (graceful default, identical to today). The image is a
+  // URL the client renders; it is never fetched or embedded into generated PDFs (name-only there).
+  logoUrl: text('logo_url'),
   // Consumer count drives the §314.6(a) small-institution exemption (PRD #7). Nullable:
   // unset means "not declared" -> nothing is exempt (safe default, identical to today).
   consumerCount: integer('consumer_count'),

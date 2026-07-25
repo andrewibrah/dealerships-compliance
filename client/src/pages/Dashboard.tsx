@@ -152,14 +152,25 @@ export default function Dashboard() {
     <div className="min-h-screen bg-gradient-to-br from-slate-900 via-slate-800 to-slate-900">
       {/* Header */}
       <div className="border-b border-slate-700 bg-slate-900/50 backdrop-blur">
-        <div className="container mx-auto px-4 py-6 flex justify-between items-center">
-          <div>
-            <h1 className="text-3xl font-bold text-white">
-              {dealershipName ? `${dealershipName} Dashboard` : "Compliance Dashboard"}
-            </h1>
-            <p className="text-slate-400">Welcome, {user.name || user.email}</p>
+        <div className="container mx-auto px-4 py-6 flex flex-wrap items-center justify-between gap-4">
+          <div className="flex items-center gap-4">
+            {/* White-label brand (PRD #45): tenant logo beside the name. Renders only when a
+                logo URL is set — otherwise the dealership name stands alone (graceful default). */}
+            {dealership?.logoUrl && (
+              <img
+                src={dealership.logoUrl}
+                alt={`${dealership.name?.trim() || "Dealership"} logo`}
+                className="h-11 w-auto max-w-[160px] object-contain"
+              />
+            )}
+            <div>
+              <h1 className="text-3xl font-bold text-white">
+                {dealershipName ? `${dealershipName} Dashboard` : "Compliance Dashboard"}
+              </h1>
+              <p className="text-slate-400">Welcome, {user.name || user.email}</p>
+            </div>
           </div>
-          <div className="flex gap-3">
+          <div className="flex flex-wrap gap-3">
             <Button variant="outline" onClick={() => setLocation("/profile")}>
               Dealership Profile
             </Button>

@@ -19,6 +19,7 @@ import { useAuth } from "@/hooks/useAuth";
 import { trpc } from "@/lib/trpc";
 import { deriveEvidenceChecklist, type EvidenceRequest } from "@shared/evidence-checklist";
 import { getApplicability, applicableRequirements } from "@shared/applicability";
+import { REQUIREMENT_GUIDANCE } from "@shared/requirements";
 
 // Evidence repository (PRD #31 upload, #32 control linking, #25 evidence-request checklist).
 // Upload flow: file picker -> evidence.getUploadUrl (server-derived, tenant-scoped key) -> PUT the
@@ -69,6 +70,16 @@ function ChecklistRow({
         )}
       </div>
       <p className="text-sm text-slate-300 mb-3">{request.requestedEvidence}</p>
+
+      {/* Per-control teaching content (PRD #27): the authored "why it matters" for this open
+          control, grounded in REQUIREMENT_GUIDANCE (never an LLM). The requested-evidence line
+          above already carries the fix, so only the rationale is added here. */}
+      {REQUIREMENT_GUIDANCE[request.requirementCode]?.whyItMatters && (
+        <p className="text-sm text-slate-300 mb-3">
+          <span className="font-semibold text-slate-200">Why this matters: </span>
+          {REQUIREMENT_GUIDANCE[request.requirementCode].whyItMatters}
+        </p>
+      )}
 
       {linked.length > 0 && (
         <ul className="mb-3 space-y-1">
@@ -231,7 +242,7 @@ export default function Evidence() {
     <div className="min-h-screen bg-gradient-to-br from-slate-900 via-slate-800 to-slate-900">
       {/* Header */}
       <div className="border-b border-slate-700 bg-slate-900/50 backdrop-blur">
-        <div className="container mx-auto px-4 py-6 flex items-center justify-between gap-4">
+        <div className="container mx-auto px-4 py-6 flex flex-wrap items-center justify-between gap-4">
           <div>
             <h1 className="text-3xl font-bold text-white">Evidence Repository</h1>
             <p className="text-slate-400">

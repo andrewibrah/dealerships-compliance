@@ -93,14 +93,14 @@ export default function Tasks() {
     <div className="min-h-screen bg-gradient-to-br from-slate-900 via-slate-800 to-slate-900">
       {/* Header */}
       <div className="border-b border-slate-700 bg-slate-900/50 backdrop-blur">
-        <div className="container mx-auto px-4 py-6 flex items-center justify-between gap-4">
+        <div className="container mx-auto px-4 py-6 flex flex-wrap items-center justify-between gap-4">
           <div>
             <h1 className="text-3xl font-bold text-white">Remediation Tasks</h1>
             <p className="text-slate-400">
               {openCount} open · {tasks.length} total — the work to close your Safeguards Rule gaps
             </p>
           </div>
-          <div className="flex gap-3">
+          <div className="flex flex-wrap gap-3">
             <Button variant="outline" onClick={() => setLocation("/dashboard")}>
               <ArrowLeft size={16} className="mr-2" aria-hidden="true" />
               Dashboard

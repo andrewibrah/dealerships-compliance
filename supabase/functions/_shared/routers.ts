@@ -17,6 +17,21 @@ import { rephraseQuestion } from '../../../shared/interview-phrasing.ts';
 import { REQUIREMENT_CATALOG } from '../../../shared/requirements.ts';
 import { computePosture, shouldRecordPosture } from '../../../shared/posture.ts';
 
+// Tenant-supplied branding URL (PRD #45), rendered into an <img src> in the app header.
+// `z.string().url()` alone accepts ANY scheme the URL constructor parses — javascript:, data:,
+// ftp: — so the scheme is pinned to http(s) here. The client checks the same thing, but client
+// validation is bypassable via a direct tRPC call: the server must enforce what the UI claims to.
+// Mirror of server/routers.ts logoUrlSchema.
+const logoUrlSchema = z
+  .string()
+  .url()
+  .refine((value) => /^https?:\/\//i.test(value), {
+    message: 'Logo URL must start with http:// or https://',
+  })
+  .or(z.literal(''))
+  .nullable()
+  .optional();
+
 // JSONB -> Control cutover (PRD #5). Additively project a saved section's answers onto derived
 // Control rows — one per answered requirement present in the GLOBAL catalog. Runs AFTER the
 // authoritative compliance_answers JSONB write, never replacing it. Deterministic: the status
@@ -101,6 +116,7 @@ const dealershipRouter = router({
       rooftopCount: z.number().int().min(1).optional(),
       qualifiedIndividual: z.string().optional(),
       qiEmail: z.string().email().or(z.literal('')).optional(),
+      logoUrl: logoUrlSchema,
       consumerCount: z.number().int().nonnegative().nullable().optional(),
     }))
     .mutation(async ({ ctx, input }) => {
@@ -114,6 +130,7 @@ const dealershipRouter = router({
         rooftopCount: input.rooftopCount ?? 1,
         qualifiedIndividual: input.qualifiedIndividual ?? '',
         qiEmail: input.qiEmail ?? '',
+        logoUrl: input.logoUrl || null,
         consumerCount: input.consumerCount ?? null,
       });
       await db.appendAuditLog({
@@ -137,12 +154,15 @@ const dealershipRouter = router({
       rooftopCount: z.number().int().min(1).optional(),
       qualifiedIndividual: z.string().optional(),
       qiEmail: z.string().email().or(z.literal('')).optional(),
+      logoUrl: logoUrlSchema,
       consumerCount: z.number().int().nonnegative().nullable().optional(),
     }))
     .mutation(async ({ ctx, input }) => {
       const existing = await db.getDealershipByUserId(ctx.user.id);
       if (!existing || existing.id !== input.id) throw new TRPCError({ code: 'FORBIDDEN' });
       const { id, ...data } = input;
+      // A cleared logo comes through as '' — store null so "no logo" is one value everywhere.
+      if (data.logoUrl === '') data.logoUrl = null;
       const updated = await db.updateDealership(id, data);
       await db.appendAuditLog({
         action: AUDIT_ACTIONS.dealershipUpdate,

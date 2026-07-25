@@ -24,6 +24,21 @@ const complianceAnswerValueSchema = z.union([
   z.null(),
 ]);
 
+// Tenant-supplied branding URL (PRD #45), rendered into an <img src> in the app header.
+// `z.string().url()` alone accepts ANY scheme the URL constructor parses — javascript:, data:,
+// ftp: — so the scheme is pinned to http(s) here. The client checks the same thing, but client
+// validation is bypassable via a direct tRPC call: the server must enforce what the UI claims to.
+// Mirrored EXACTLY in supabase/functions/_shared/routers.ts.
+const logoUrlSchema = z
+  .string()
+  .url()
+  .refine((value) => /^https?:\/\//i.test(value), {
+    message: 'Logo URL must start with http:// or https://',
+  })
+  .or(z.literal(''))
+  .nullable()
+  .optional();
+
 // JSONB -> Control cutover (PRD #5). Additively project a saved section's answers onto derived
 // Control rows — one per answered requirement present in the GLOBAL catalog. Runs AFTER the
 // authoritative compliance_answers JSONB write, never replacing it. Deterministic: the status
@@ -116,6 +131,7 @@ export const appRouter = router({
           rooftopCount: z.number().int().min(1).optional(),
           qualifiedIndividual: z.string().optional(),
           qiEmail: z.string().email().or(z.literal('')).optional(),
+          logoUrl: logoUrlSchema,
           consumerCount: z.number().int().nonnegative().nullable().optional(),
         })
       )
@@ -130,6 +146,7 @@ export const appRouter = router({
           rooftopCount: input.rooftopCount ?? 1,
           qualifiedIndividual: input.qualifiedIndividual ?? '',
           qiEmail: input.qiEmail ?? '',
+          logoUrl: input.logoUrl || null,
           consumerCount: input.consumerCount ?? null,
         });
         await db.appendAuditLog({
@@ -155,6 +172,7 @@ export const appRouter = router({
           rooftopCount: z.number().int().min(1).optional(),
           qualifiedIndividual: z.string().optional(),
           qiEmail: z.string().email().or(z.literal('')).optional(),
+          logoUrl: logoUrlSchema,
           consumerCount: z.number().int().nonnegative().nullable().optional(),
         })
       )
@@ -164,6 +182,8 @@ export const appRouter = router({
           throw new Error('Unauthorized');
         }
         const { id, ...updateData } = input;
+        // A cleared logo comes through as '' — store null so "no logo" is one value everywhere.
+        if (updateData.logoUrl === '') updateData.logoUrl = null;
         await db.updateDealership(id, updateData);
         await db.appendAuditLog({
           action: AUDIT_ACTIONS.dealershipUpdate,
