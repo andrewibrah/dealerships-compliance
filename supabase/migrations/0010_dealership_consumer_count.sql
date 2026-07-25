@@ -11,8 +11,8 @@
 --     has row-level policies (0003 tenant isolation); column privileges follow the table grant,
 --     and RLS filters rows, not columns. No RLS/DDL beyond the ADD COLUMN.
 --
--- Idempotent: `add column if not exists` sets the same shape on every re-run. HUMAN-applied via
--- the Supabase SQL editor (numeric↔timestamped history caveat — do NOT `supabase db push`).
+-- Idempotent: `add column if not exists` sets the same shape on every re-run. Applied to the
+-- linked project on 2026-07-25 and recorded in supabase_migrations.schema_migrations.
 -- =========================================================================================
 
 do $$

@@ -18,8 +18,8 @@
 -- default), so a NULL <ref>_id skips the check — an unlinked risk/task/flow stays valid.
 --
 -- Idempotent throughout: every ADD CONSTRAINT is wrapped in a DO block that swallows
--- duplicate_object, so re-applying is a no-op. Human-applied via the Supabase SQL editor (never
--- `supabase db push`); drizzle/schema.ts reflects the same constraints so a later `pnpm db:push`
+-- duplicate_object, so re-applying is a no-op. Applied to the linked project (2026-07-25) and
+-- recorded in supabase_migrations; drizzle/schema.ts reflects the same constraints so `pnpm db:push`
 -- is a no-op. Depends on 0005 (controls), 0006 (evidence, policies), 0007 (assets); numeric
 -- ordering guarantees they apply first.
 -- =========================================================================================

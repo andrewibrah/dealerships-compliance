@@ -13,8 +13,8 @@
 -- Depends on 0001 (public.dealerships) and 0003 (public.current_user_dealership_ids() in the
 -- tenant policy); the numeric ordering guarantees both apply first.
 --
--- Idempotent: `create table if not exists` + guarded policy. HUMAN-applied via the Supabase
--- SQL editor (numeric<->timestamped history caveat — do NOT `supabase db push`).
+-- Idempotent: `create table if not exists` + guarded policy. Applied to the linked project on
+-- 2026-07-25 and recorded in supabase_migrations.schema_migrations.
 -- =========================================================================================
 
 create table if not exists public.posture_snapshots (

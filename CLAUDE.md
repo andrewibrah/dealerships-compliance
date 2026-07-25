@@ -95,6 +95,14 @@ are superseded), `ACCESSIBILITY-AUDIT.md` (a11y program).
   Never route pass/fail through an LLM.
 - **Schema changes** go in `drizzle/schema.ts` (source of truth), then `pnpm db:push`; add the SQL
   under `supabase/migrations/` for the deployed database.
+- **Migrations are applied directly by the agent** — the Supabase CLI and `psql` are available and
+  the project is linked (`SUPABASE_DB_URL` / `SUPABASE_ACCESS_TOKEN` in `.env`). Apply a migration
+  with `psql "$SUPABASE_DB_URL" -v ON_ERROR_STOP=1 -f supabase/migrations/<file>.sql`, then record
+  it in `supabase_migrations.schema_migrations`. Author every migration **idempotently**
+  (`if not exists` / guarded `do $$`) so a re-run is a no-op. The old "human-applies-via-SQL-editor,
+  never `supabase db push`" rule is **retired**: the numeric↔timestamped history divergence was
+  reconciled on 2026-07-25, `0001`–`0012` are all recorded, and `supabase migration list --linked`
+  shows local and remote in sync with nothing pending.
 - **Tests** are Vitest: `server/*.test.ts` for domain logic, `client/src/__a11y__/*` for accessibility.
 - Match the surrounding file's style; make surgical changes tied to the active task.
 
