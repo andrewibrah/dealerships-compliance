@@ -3,7 +3,7 @@ import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Loader2 } from "lucide-react";
+import { Loader2, LogOut } from "lucide-react";
 import { useLocation } from "wouter";
 import { useAuth } from "@/hooks/useAuth";
 import { trpc } from "@/lib/trpc";
@@ -40,12 +40,29 @@ const emptyForm: ProfileForm = {
 
 export default function Profile() {
   const [, setLocation] = useLocation();
-  const { user, isAuthenticated, loading } = useAuth();
+  const { user, isAuthenticated, loading, logout } = useAuth();
   const utils = trpc.useUtils();
   const dealershipQuery = trpc.dealership.getCurrent.useQuery(undefined, {
     enabled: isAuthenticated,
   });
   const [form, setForm] = useState<ProfileForm>(emptyForm);
+  const [isLoggingOut, setIsLoggingOut] = useState(false);
+
+  // Sign out. `logout` is best-effort by design (it swallows a failed audit write rather than
+  // trapping the user in a session), so the only failure that can surface here is an unexpected
+  // throw — surface it and re-enable the button rather than leaving it stuck.
+  const handleLogout = async () => {
+    setIsLoggingOut(true);
+    try {
+      // Drop cached tenant data so the next account to sign in on this browser can never be
+      // shown the previous dealership's cached answers/documents.
+      await logout();
+      utils.invalidate();
+    } catch {
+      toast.error("Could not sign out. Please try again.");
+      setIsLoggingOut(false);
+    }
+  };
 
   useEffect(() => {
     if (!dealershipQuery.data) return;
@@ -159,9 +176,18 @@ export default function Profile() {
             <h1 className="text-3xl font-bold text-white">Dealership Profile</h1>
             <p className="text-slate-400">These details appear in your WISP and board report.</p>
           </div>
-          <Button variant="outline" onClick={() => setLocation("/dashboard")}>
-            Back to Dashboard
-          </Button>
+          <div className="flex flex-wrap gap-3">
+            <Button variant="outline" onClick={() => setLocation("/dashboard")}>
+              Back to Dashboard
+            </Button>
+            {/* Sign out. useAuth.logout records the audit event server-side while the token is
+                still valid (PRD #34), then tears down the session and redirects home. Disabled
+                while in flight so a double-click can't fire two logout mutations. */}
+            <Button variant="outline" onClick={handleLogout} disabled={isLoggingOut}>
+              <LogOut size={16} className="mr-2" aria-hidden="true" />
+              {isLoggingOut ? "Signing out..." : "Sign Out"}
+            </Button>
+          </div>
         </div>
       </div>
 
