@@ -28,6 +28,15 @@ vi.mock("@/lib/trpc", () => ({
       getAnswers: { useQuery: () => answersResult },
       saveSection: { useMutation: () => ({ mutate, isPending: false }) },
     },
+    // No consumer count -> nothing is exempt -> every question renders (the default path).
+    dealership: {
+      getCurrent: { useQuery: () => ({ data: null, isLoading: false }) },
+    },
+    // Conversational mode is off in these tests; the query stays disabled and the canonical
+    // question text renders as the radiogroup's accessible name.
+    interview: {
+      rephrase: { useQuery: () => ({ data: undefined }) },
+    },
   },
 }));
 

@@ -43,3 +43,17 @@ export async function evidenceGetSignedUrl(key: string): Promise<string> {
   if (error || !data) throw new Error(`Failed to sign evidence download URL: ${error?.message ?? 'unknown'}`);
   return data.signedUrl;
 }
+
+// Signed UPLOAD URL for the private `evidence` bucket (PRD #31). The browser PUTs the raw file
+// bytes to the returned `uploadUrl` (no further auth — the token is embedded in the URL). The
+// caller MUST pass a SERVER-DERIVED, tenant-scoped key (see evidence.getUploadUrl) — never a
+// client-supplied path — so an upload can never land outside the dealer's folder. Same bucket
+// as evidenceGetSignedUrl.
+export async function evidenceGetSignedUploadUrl(
+  key: string,
+): Promise<{ uploadUrl: string; token: string }> {
+  const storage = getStorageClient();
+  const { data, error } = await storage.from(EVIDENCE_BUCKET).createSignedUploadUrl(key);
+  if (error || !data) throw new Error(`Failed to sign evidence upload URL: ${error?.message ?? 'unknown'}`);
+  return { uploadUrl: data.signedUrl, token: data.token };
+}

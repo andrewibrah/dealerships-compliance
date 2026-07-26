@@ -1,6 +1,6 @@
 # Next Work — handoff for the next session
 
-## Carryover from #4 (operational — do first; needs a human + live infra)
+## Carryover from #4 (operational — do first; )
 Remediation #4 (object model) is **code-complete, committed, and pushed**: branch
 `feat/prd3-object-model` (`db546a9`), all 9 PRD #3 entities + the `evidence_controls` join, both
 runtimes, migrations `0005–0007`, 116 tests green. NOT merged to main; migrations NOT applied. Full

@@ -34,6 +34,7 @@ export const AUDIT_ACTIONS = {
   dataFlowUpdate: 'data_flow.update',
   attestationCreate: 'attestation.create',
   attestationUpdate: 'attestation.update',
+  postureSnapshot: 'posture.snapshot',
 } as const;
 
 export type AuditAction = (typeof AUDIT_ACTIONS)[keyof typeof AUDIT_ACTIONS];

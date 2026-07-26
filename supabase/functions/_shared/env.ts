@@ -10,5 +10,8 @@ export const ENV = {
   stripeManagedPrice: Deno.env.get('STRIPE_MANAGED_PRICE_ID') ?? '',
   resendApiKey: Deno.env.get('RESEND_API_KEY') ?? '',
   openaiApiKey: Deno.env.get('OPENAI_API_KEY') ?? '',
+  // Optional: enables the conversational question-phrasing layer (PRD #11/#39). Absent by
+  // default -> rephrase passthrough (plain forms). Never used to decide compliance.
+  anthropicApiKey: Deno.env.get('ANTHROPIC_API_KEY') ?? '',
   appUrl: Deno.env.get('VITE_APP_URL') ?? 'https://andrewibrah.github.io/dealerships-compliance',
 };

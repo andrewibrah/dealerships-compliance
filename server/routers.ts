@@ -2,9 +2,18 @@ import { systemRouter } from './_core/systemRouter';
 import { publicProcedure, router, protectedProcedure } from './_core/trpc';
 import { z } from 'zod';
 import * as db from './db';
-import { resolveTenantScope } from '@shared/tenant-guard';
+import { resolveTenantScope, type TenantScope } from '@shared/tenant-guard';
 import { AUDIT_ACTIONS } from '@shared/audit';
-import { storageGetSignedUrl, evidenceGetSignedUrl } from './storage';
+import { deriveControlStatus, type AnswerValue } from '@shared/controls';
+import { deriveTasksFromControls } from '@shared/task-derivation';
+import { getAllQuestions } from '@shared/safeguards-questions';
+import { rephraseQuestion } from '@shared/interview-phrasing';
+import { REQUIREMENT_CATALOG } from '@shared/requirements';
+import { computePosture, shouldRecordPosture } from '@shared/posture';
+import { ENV } from './_core/env';
+import { storageGetSignedUrl, evidenceGetSignedUrl, evidenceGetSignedUploadUrl } from './storage';
+import { deriveEvidenceStorageKey, isEvidenceKeyInDealershipScope } from '@shared/evidence-storage';
+import { computePolicyTransition } from '@shared/policy-lifecycle';
 import { pdfRouter } from './pdf-router';
 import { stripeRouter } from './stripe-router';
 
@@ -14,6 +23,79 @@ const complianceAnswerValueSchema = z.union([
   z.boolean(),
   z.null(),
 ]);
+
+// Tenant-supplied branding URL (PRD #45), rendered into an <img src> in the app header.
+// `z.string().url()` alone accepts ANY scheme the URL constructor parses — javascript:, data:,
+// ftp: — so the scheme is pinned to http(s) here. The client checks the same thing, but client
+// validation is bypassable via a direct tRPC call: the server must enforce what the UI claims to.
+// Mirrored EXACTLY in supabase/functions/_shared/routers.ts.
+const logoUrlSchema = z
+  .string()
+  .url()
+  .refine((value) => /^https?:\/\//i.test(value), {
+    message: 'Logo URL must start with http:// or https://',
+  })
+  .or(z.literal(''))
+  .nullable()
+  .optional();
+
+// JSONB -> Control cutover (PRD #5). Additively project a saved section's answers onto derived
+// Control rows — one per answered requirement present in the GLOBAL catalog. Runs AFTER the
+// authoritative compliance_answers JSONB write, never replacing it. Deterministic: the status
+// comes straight from deriveControlStatus (no LLM). Always writes source: 'questionnaire'. Codes
+// with no catalog match are skipped. Returns the number upserted (surfaced in the save audit
+// metadata). Mirrored EXACTLY in supabase/functions/_shared/routers.ts.
+async function upsertDerivedControls(
+  scope: TenantScope,
+  answers: Record<string, AnswerValue>,
+): Promise<number> {
+  const catalog = await db.listRequirements();
+  const requirementIdByCode = new Map(catalog.map((r) => [r.code, r.id]));
+  let controlsUpserted = 0;
+  for (const [code, value] of Object.entries(answers)) {
+    const requirementId = requirementIdByCode.get(code);
+    if (requirementId === undefined) continue;
+    await db.upsertControl(scope, {
+      requirementId,
+      status: deriveControlStatus(value),
+      notes: '',
+      source: 'questionnaire',
+    });
+    controlsUpserted += 1;
+  }
+  return controlsUpserted;
+}
+
+// Continuous posture tracking (PRD #33). After the answers write, recompute the dealer's overall
+// posture the SAME way the Dashboard does (applicability-aware derivation over the global catalog)
+// and append a history row ONLY when the overall score changed vs the latest snapshot (dedup in
+// shared/posture.ts) — so per-answer saves don't flood the table. Additive + audited. Mirrored in
+// supabase/functions/_shared/routers.ts.
+async function recordPostureSnapshot(
+  scope: TenantScope,
+  profile: { consumerCount: number | null },
+  actor: { userId: string; email: string },
+): Promise<void> {
+  const rows = await db.getAllComplianceAnswers(scope);
+  const answers: Record<string, AnswerValue> = {};
+  for (const row of rows) Object.assign(answers, (row.answers as Record<string, AnswerValue>) ?? {});
+  const posture = computePosture(REQUIREMENT_CATALOG, answers, profile);
+  const latest = await db.getLatestPostureSnapshot(scope);
+  if (!shouldRecordPosture(latest?.overallScore ?? null, posture.overallScore)) return;
+  const snapshot = await db.createPostureSnapshot(scope, {
+    overallScore: posture.overallScore,
+    riskLevel: posture.riskLevel,
+    sectionScores: posture.sectionScores,
+  });
+  await db.appendAuditLog({
+    action: AUDIT_ACTIONS.postureSnapshot,
+    actor,
+    entityType: 'posture_snapshot',
+    entityId: snapshot.id,
+    dealershipId: scope.dealershipId,
+    metadata: { overallScore: posture.overallScore, riskLevel: posture.riskLevel },
+  });
+}
 
 export const appRouter = router({
   system: systemRouter,
@@ -49,6 +131,8 @@ export const appRouter = router({
           rooftopCount: z.number().int().min(1).optional(),
           qualifiedIndividual: z.string().optional(),
           qiEmail: z.string().email().or(z.literal('')).optional(),
+          logoUrl: logoUrlSchema,
+          consumerCount: z.number().int().nonnegative().nullable().optional(),
         })
       )
       .mutation(async ({ ctx, input }) => {
@@ -62,6 +146,8 @@ export const appRouter = router({
           rooftopCount: input.rooftopCount ?? 1,
           qualifiedIndividual: input.qualifiedIndividual ?? '',
           qiEmail: input.qiEmail ?? '',
+          logoUrl: input.logoUrl || null,
+          consumerCount: input.consumerCount ?? null,
         });
         await db.appendAuditLog({
           action: AUDIT_ACTIONS.dealershipCreate,
@@ -86,6 +172,8 @@ export const appRouter = router({
           rooftopCount: z.number().int().min(1).optional(),
           qualifiedIndividual: z.string().optional(),
           qiEmail: z.string().email().or(z.literal('')).optional(),
+          logoUrl: logoUrlSchema,
+          consumerCount: z.number().int().nonnegative().nullable().optional(),
         })
       )
       .mutation(async ({ ctx, input }) => {
@@ -94,6 +182,8 @@ export const appRouter = router({
           throw new Error('Unauthorized');
         }
         const { id, ...updateData } = input;
+        // A cleared logo comes through as '' — store null so "no logo" is one value everywhere.
+        if (updateData.logoUrl === '') updateData.logoUrl = null;
         await db.updateDealership(id, updateData);
         await db.appendAuditLog({
           action: AUDIT_ACTIONS.dealershipUpdate,
@@ -146,14 +236,20 @@ export const appRouter = router({
           sectionName: input.sectionName,
           answers: input.answers,
         });
+        const controlsUpserted = await upsertDerivedControls(scope, input.answers);
         await db.appendAuditLog({
           action: AUDIT_ACTIONS.complianceSaveSection,
           actor: { userId: ctx.user.id, email: ctx.user.email },
           entityType: 'compliance_answer',
           entityId: input.section,
           dealershipId: scope.dealershipId,
-          metadata: { section: input.section, sectionName: input.sectionName },
+          metadata: { section: input.section, sectionName: input.sectionName, controlsUpserted },
         });
+        await recordPostureSnapshot(
+          scope,
+          { consumerCount: scope.dealership.consumerCount },
+          { userId: ctx.user.id, email: ctx.user.email },
+        );
         return { success: true };
       }),
 
@@ -178,6 +274,7 @@ export const appRouter = router({
           completed: input.completed !== undefined ? Boolean(input.completed) : undefined,
           completedAt: input.completed ? new Date() : null,
         });
+        const controlsUpserted = await upsertDerivedControls(scope, input.answers);
         await db.appendAuditLog({
           action: AUDIT_ACTIONS.complianceSaveSection,
           actor: { userId: ctx.user.id, email: ctx.user.email },
@@ -188,9 +285,41 @@ export const appRouter = router({
             section: input.section,
             sectionName: input.sectionName,
             completed: input.completed !== undefined ? Boolean(input.completed) : undefined,
+            controlsUpserted,
           },
         });
+        await recordPostureSnapshot(
+          scope,
+          { consumerCount: scope.dealership.consumerCount },
+          { userId: ctx.user.id, email: ctx.user.email },
+        );
         return { success: true };
+      }),
+  }),
+
+  // Posture history — a tenant-scoped time series of overall compliance score (PRD #33).
+  posture: router({
+    list: protectedProcedure.query(async ({ ctx }) => {
+      const scope = await resolveTenantScope(db, ctx.user.id);
+      if (!scope) return [];
+      return db.listPostureSnapshots(scope);
+    }),
+  }),
+
+  // Optional conversational phrasing (PRD #11/#39) — DISPLAY ONLY. A QUERY: it writes
+  // nothing (no audit). It rephrases ONE server-owned question's text; the model NEVER
+  // decides an answer, status, score, or citation. Returns { text } only. Passthrough
+  // (original text) when no LLM key is configured. Mirrored in the Deno router.
+  interview: router({
+    rephrase: protectedProcedure
+      .input(z.object({ questionId: z.string() }))
+      .query(async ({ input }) => {
+        const question = getAllQuestions().find((q) => q.id === input.questionId);
+        if (!question) return { text: '' };
+        return rephraseQuestion(
+          { questionText: question.text, hint: question.hint },
+          { openaiApiKey: ENV.openaiApiKey, anthropicApiKey: ENV.anthropicApiKey },
+        );
       }),
   }),
 
@@ -329,6 +458,27 @@ export const appRouter = router({
       return db.listEvidence(scope);
     }),
 
+    // Mint a short-lived signed URL the browser PUTs an evidence file to (PRD #31). The storage
+    // key is SERVER-derived from the resolved tenant scope (deriveEvidenceStorageKey) — the
+    // client-supplied fileName is sanitized to a bare segment and can never widen the path or
+    // reach another dealer's folder (path-traversal / cross-tenant write guard). No DB write and
+    // no audit here: the row + its audit land in evidence.create AFTER the browser uploads, and
+    // the returned `key` is what the client passes back as storagePath. Mirrored in the Deno twin.
+    getUploadUrl: protectedProcedure
+      .input(
+        z.object({
+          fileName: z.string().min(1),
+          contentType: z.string().default('application/octet-stream'),
+        })
+      )
+      .mutation(async ({ ctx, input }) => {
+        const scope = await resolveTenantScope(db, ctx.user.id, { createIfMissing: true });
+        if (!scope) throw new Error('Unable to resolve dealership');
+        const key = deriveEvidenceStorageKey(scope.dealershipId, input.fileName);
+        const { uploadUrl, token } = await evidenceGetSignedUploadUrl(key);
+        return { key, uploadUrl, token };
+      }),
+
     create: protectedProcedure
       .input(
         z.object({
@@ -343,6 +493,11 @@ export const appRouter = router({
       .mutation(async ({ ctx, input }) => {
         const scope = await resolveTenantScope(db, ctx.user.id, { createIfMissing: true });
         if (!scope) throw new Error('Unable to resolve dealership');
+        // Harden: the client echoes back the storagePath it uploaded to; reject any path outside
+        // this dealership's own evidence folder so a row can never point at another tenant's object.
+        if (!isEvidenceKeyInDealershipScope(scope.dealershipId, input.storagePath)) {
+          throw new Error('Forbidden: evidence storagePath is outside this dealership scope');
+        }
         const item = await db.createEvidence(scope, {
           title: input.title,
           description: input.description,
@@ -479,6 +634,34 @@ export const appRouter = router({
         });
         return task;
       }),
+
+    // Remediation roadmap (PRD #24/#40): project OPEN controls onto suggested tasks. Pure,
+    // deterministic (deriveTasksFromControls — no LLM) and idempotent (skips controls that
+    // already have a task), so this is safe to re-run. Every created task is audited.
+    deriveFromControls: protectedProcedure.mutation(async ({ ctx }) => {
+      const scope = await resolveTenantScope(db, ctx.user.id, { createIfMissing: true });
+      if (!scope) throw new Error('Unable to resolve dealership');
+      const [controls, requirements, existingTasks] = await Promise.all([
+        db.listControls(scope),
+        db.listRequirements(),
+        db.listTasks(scope),
+      ]);
+      const derived = deriveTasksFromControls({ controls, requirements, existingTasks });
+      const created = [];
+      for (const input of derived) {
+        const task = await db.createTask(scope, input);
+        await db.appendAuditLog({
+          action: AUDIT_ACTIONS.taskCreate,
+          actor: { userId: ctx.user.id, email: ctx.user.email },
+          entityType: 'task',
+          entityId: task.id,
+          dealershipId: scope.dealershipId,
+          metadata: { title: task.title, priority: task.priority, source: 'derive', controlId: input.controlId },
+        });
+        created.push(task);
+      }
+      return created;
+    }),
   }),
 
   // Policies — written policies/procedures (tenant-scoped, PRD #22/#26).
@@ -489,19 +672,18 @@ export const appRouter = router({
       return db.listPolicies(scope);
     }),
 
+    // Lifecycle fields (status/version/adoptedAt) are NOT settable here — they flow ONLY through
+    // `transition` (the validated state machine). A created policy is always a fresh draft; this
+    // keeps the set-once adoptedAt + no-backward-transition guarantees enforceable end-to-end.
     create: protectedProcedure
       .input(
         z.object({
           policyType: z.string().min(1),
           title: z.string().min(1),
-          status: z.enum(['draft', 'in_review', 'approved', 'adopted', 'archived']).default('draft'),
-          version: z.number().int().min(1).default(1),
           content: z.string().default(''),
           storagePath: z.string().nullable().optional(),
           requirementId: z.number().int().nullable().optional(),
-          approvedBy: z.string().default(''),
-          adoptedAt: z.coerce.date().nullable().optional(),
-        })
+        }).strict()
       )
       .mutation(async ({ ctx, input }) => {
         const scope = await resolveTenantScope(db, ctx.user.id, { createIfMissing: true });
@@ -509,13 +691,13 @@ export const appRouter = router({
         const policy = await db.createPolicy(scope, {
           policyType: input.policyType,
           title: input.title,
-          status: input.status,
-          version: input.version,
+          status: 'draft',
+          version: 1,
           content: input.content,
           storagePath: input.storagePath ?? null,
           requirementId: input.requirementId ?? null,
-          approvedBy: input.approvedBy,
-          adoptedAt: input.adoptedAt ?? null,
+          approvedBy: '',
+          adoptedAt: null,
         });
         await db.appendAuditLog({
           action: AUDIT_ACTIONS.policyCreate,
@@ -523,25 +705,25 @@ export const appRouter = router({
           entityType: 'policy',
           entityId: policy.id,
           dealershipId: scope.dealershipId,
-          metadata: { policyType: input.policyType, title: policy.title, status: input.status },
+          metadata: { policyType: input.policyType, title: policy.title, status: 'draft' },
         });
         return policy;
       }),
 
+    // Content-only edit. Lifecycle fields (status/version/adoptedAt) are intentionally NOT
+    // accepted — status changes must go through `transition` so adoptedAt stays set-once and no
+    // backward/skip transition is possible via the API.
     update: protectedProcedure
       .input(
         z.object({
           id: z.number().int(),
           policyType: z.string().min(1).optional(),
           title: z.string().min(1).optional(),
-          status: z.enum(['draft', 'in_review', 'approved', 'adopted', 'archived']).optional(),
-          version: z.number().int().min(1).optional(),
           content: z.string().optional(),
           storagePath: z.string().nullable().optional(),
           requirementId: z.number().int().nullable().optional(),
           approvedBy: z.string().optional(),
-          adoptedAt: z.coerce.date().nullable().optional(),
-        })
+        }).strict()
       )
       .mutation(async ({ ctx, input }) => {
         const scope = await resolveTenantScope(db, ctx.user.id);
@@ -556,6 +738,46 @@ export const appRouter = router({
           entityId: id,
           dealershipId: scope.dealershipId,
           metadata: { fields: Object.keys(changes) },
+        });
+        return policy;
+      }),
+
+    // Approval workflow (PRD #26/#41). Enforce the lifecycle SERVER-SIDE via the deterministic
+    // state machine in shared/policy-lifecycle.ts: it rejects any disallowed/backward transition,
+    // bumps version when a previously-approved policy re-enters an editable state, and stamps
+    // adoptedAt exactly once (adopted is terminal, so it can never be overwritten). Tenant-scoped
+    // and audited as a policyUpdate carrying from/to status.
+    transition: protectedProcedure
+      .input(
+        z.object({
+          id: z.number().int(),
+          toStatus: z.enum(['draft', 'in_review', 'approved', 'adopted', 'archived']),
+        })
+      )
+      .mutation(async ({ ctx, input }) => {
+        const scope = await resolveTenantScope(db, ctx.user.id);
+        if (!scope) throw new Error('No dealership found');
+        const existing = (await db.listPolicies(scope)).find((p) => p.id === input.id);
+        if (!existing) throw new Error('Policy not found');
+        const changes = computePolicyTransition(
+          { status: existing.status, version: existing.version, adoptedAt: existing.adoptedAt },
+          input.toStatus,
+          new Date(),
+        );
+        const policy = await db.updatePolicy(scope, input.id, changes);
+        if (!policy) throw new Error('Policy not found');
+        await db.appendAuditLog({
+          action: AUDIT_ACTIONS.policyUpdate,
+          actor: { userId: ctx.user.id, email: ctx.user.email },
+          entityType: 'policy',
+          entityId: input.id,
+          dealershipId: scope.dealershipId,
+          metadata: {
+            transition: true,
+            fromStatus: existing.status,
+            toStatus: input.toStatus,
+            version: changes.version,
+          },
         });
         return policy;
       }),

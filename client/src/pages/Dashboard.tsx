@@ -1,7 +1,7 @@
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { Progress } from "@/components/ui/progress";
-import { AlertTriangle, CheckCircle2, AlertCircle, TrendingUp, Loader2 } from "lucide-react";
+import { AlertTriangle, CheckCircle2, AlertCircle, TrendingUp, Loader2, FileText, ListChecks, ShieldCheck, Paperclip } from "lucide-react";
 import { useLocation } from "wouter";
 import { useAuth } from "@/hooks/useAuth";
 import { trpc } from "@/lib/trpc";
@@ -11,6 +11,25 @@ import {
   calculateOverallScore,
   type SectionScore,
 } from "@shared/scoring";
+import {
+  deriveAssessmentFromAnswers,
+  type DerivedGap,
+  type DerivedSectionScore,
+} from "@shared/derivation";
+import { REQUIREMENT_CATALOG, REQUIREMENT_GUIDANCE } from "@shared/requirements";
+import type { AnswerValue } from "@shared/controls";
+import {
+  getApplicability,
+  applicableQuestions,
+  applicableRequirements,
+} from "@shared/applicability";
+
+/** The dealer's saved answer for a gap, phrased for the reader (grounded in the derived status). */
+function triggeringAnswerLabel(gap: DerivedGap): string {
+  if (gap.status === "partial") return "You answered: Partially in place";
+  if (gap.status === "not_implemented") return "You answered: No";
+  return "Not answered yet";
+}
 
 export default function Dashboard() {
   const [, setLocation] = useLocation();
@@ -22,18 +41,50 @@ export default function Dashboard() {
   const dealershipQuery = trpc.dealership.getCurrent.useQuery(undefined, {
     enabled: isAuthenticated,
   });
+  const tasksQuery = trpc.tasks.list.useQuery(undefined, {
+    enabled: isAuthenticated,
+  });
+  const postureQuery = trpc.posture.list.useQuery(undefined, {
+    enabled: isAuthenticated,
+  });
   const isLoadingScores = isAuthenticated && (answersQuery.isLoading || dealershipQuery.isLoading);
 
+  // Open remediation tasks = anything not resolved (PRD #38 dashboard surfacing). Additive:
+  // never blocks the score render — defaults to 0 until tasks.list resolves.
+  const openTaskCount = (tasksQuery.data ?? []).filter(
+    (t) => t.status !== "done" && t.status !== "cancelled"
+  ).length;
+
   const grouped: Record<number, Record<string, any>> = {};
+  const flatAnswers: Record<string, AnswerValue> = {};
   (answersQuery.data ?? []).forEach((row) => {
-    grouped[row.section] = (row.answers as Record<string, any>) ?? {};
+    const rowAnswers = (row.answers as Record<string, AnswerValue>) ?? {};
+    grouped[row.section] = rowAnswers;
+    Object.assign(flatAnswers, rowAnswers);
   });
 
-  const sectionResults: SectionScore[] = SAFEGUARDS_SECTIONS.map((sec) => ({
-    ...calculateSectionScore(grouped[sec.number] || {}, sec.questions),
+  // Scope-aware (PRD #7): under the §314.6 exemption, out-of-scope questions leave the
+  // denominator and fully-exempt sections drop out entirely. Default (no consumer count) is
+  // identity — all nine sections, every question — so scores stay identical to today.
+  const applicability = getApplicability({
+    consumerCount: dealershipQuery.data?.consumerCount ?? null,
+  });
+  const applicableSections = SAFEGUARDS_SECTIONS.filter(
+    (sec) => applicableQuestions(sec.questions, applicability).length > 0
+  );
+
+  const sectionResults: SectionScore[] = applicableSections.map((sec) => ({
+    ...calculateSectionScore(grouped[sec.number] || {}, applicableQuestions(sec.questions, applicability)),
     section: sec.number,
     sectionName: sec.name,
   }));
+
+  // Explainability spine: same scores as sectionResults (proven equivalent in
+  // server/derivation.test.ts), but each gap carries its §314.4 citation + triggering answer.
+  const assessment = deriveAssessmentFromAnswers(
+    applicableRequirements(REQUIREMENT_CATALOG, applicability),
+    flatAnswers
+  );
 
   const sectionScores: Record<number, number> = {};
   sectionResults.forEach((r) => {
@@ -55,7 +106,7 @@ export default function Dashboard() {
   ].filter(Boolean);
 
   // Owner priorities: worst sections first, critical gaps ahead of standard ones
-  const prioritySections = [...sectionResults]
+  const prioritySections: DerivedSectionScore[] = [...assessment.sections]
     .filter((r) => r.score < 80)
     .sort(
       (a, b) =>
@@ -101,16 +152,39 @@ export default function Dashboard() {
     <div className="min-h-screen bg-gradient-to-br from-slate-900 via-slate-800 to-slate-900">
       {/* Header */}
       <div className="border-b border-slate-700 bg-slate-900/50 backdrop-blur">
-        <div className="container mx-auto px-4 py-6 flex justify-between items-center">
-          <div>
-            <h1 className="text-3xl font-bold text-white">
-              {dealershipName ? `${dealershipName} Dashboard` : "Compliance Dashboard"}
-            </h1>
-            <p className="text-slate-400">Welcome, {user.name || user.email}</p>
+        <div className="container mx-auto px-4 py-6 flex flex-wrap items-center justify-between gap-4">
+          <div className="flex items-center gap-4">
+            {/* White-label brand (PRD #45): tenant logo beside the name. Renders only when a
+                logo URL is set — otherwise the dealership name stands alone (graceful default). */}
+            {dealership?.logoUrl && (
+              <img
+                src={dealership.logoUrl}
+                alt={`${dealership.name?.trim() || "Dealership"} logo`}
+                className="h-11 w-auto max-w-[160px] object-contain"
+              />
+            )}
+            <div>
+              <h1 className="text-3xl font-bold text-white">
+                {dealershipName ? `${dealershipName} Dashboard` : "Compliance Dashboard"}
+              </h1>
+              <p className="text-slate-400">Welcome, {user.name || user.email}</p>
+            </div>
           </div>
-          <div className="flex gap-3">
+          <div className="flex flex-wrap gap-3">
             <Button variant="outline" onClick={() => setLocation("/profile")}>
               Dealership Profile
+            </Button>
+            <Button variant="outline" onClick={() => setLocation("/summary")}>
+              <FileText size={16} className="mr-2" aria-hidden="true" />
+              Risk Summary
+            </Button>
+            <Button variant="outline" onClick={() => setLocation("/architecture")}>
+              <ShieldCheck size={16} className="mr-2" aria-hidden="true" />
+              Architecture
+            </Button>
+            <Button variant="outline" onClick={() => setLocation("/evidence")}>
+              <Paperclip size={16} className="mr-2" aria-hidden="true" />
+              Evidence
             </Button>
             <Button onClick={() => setLocation("/wizard")} className="bg-amber-600 hover:bg-amber-500 text-slate-950">
               Continue Assessment
@@ -173,21 +247,96 @@ export default function Dashboard() {
             <div>
               <h3 className="text-sm font-semibold text-slate-300 mb-4">Sections Completed</h3>
               <div className="text-3xl font-bold text-white">
-                {Object.values(sectionScores).filter((s) => s > 0).length} <span className="text-lg text-slate-400">/ 9</span>
+                {Object.values(sectionScores).filter((s) => s > 0).length}{" "}
+                <span className="text-lg text-slate-400">/ {applicableSections.length}</span>
               </div>
             </div>
 
             <div>
               <h3 className="text-sm font-semibold text-slate-300 mb-4">Next Steps</h3>
-              <Button
-                size="sm"
-                onClick={() => setLocation("/documents")}
-                className="bg-amber-600 hover:bg-amber-500 text-slate-950 w-full"
-              >
-                Generate Documents
-              </Button>
+              <div className="mb-3 flex items-baseline gap-2">
+                <span className="text-3xl font-bold text-white">{openTaskCount}</span>
+                <span className="text-sm text-slate-400">
+                  open remediation task{openTaskCount === 1 ? "" : "s"}
+                </span>
+              </div>
+              <div className="flex flex-col gap-2">
+                <Button
+                  size="sm"
+                  onClick={() => setLocation("/documents")}
+                  className="bg-amber-600 hover:bg-amber-500 text-slate-950 w-full"
+                >
+                  Generate Documents
+                </Button>
+                <Button
+                  size="sm"
+                  variant="outline"
+                  onClick={() => setLocation("/tasks")}
+                  className="w-full"
+                >
+                  <ListChecks size={16} className="mr-2" aria-hidden="true" />
+                  View Tasks
+                </Button>
+              </div>
             </div>
           </div>
+        </Card>
+
+        {/* Compliance Posture Trend (PRD #33) — overall score over time from posture_snapshots. */}
+        <Card className="bg-slate-800 border-slate-700 p-8 mb-12">
+          <div className="flex items-center gap-3 mb-6">
+            <TrendingUp className="text-amber-500" size={24} aria-hidden="true" />
+            <h2 className="text-2xl font-bold text-white">Compliance Posture Trend</h2>
+          </div>
+          {(() => {
+            const history = (postureQuery.data ?? []).map((s) => ({
+              score: s.overallScore,
+              at: new Date(s.createdAt).toLocaleDateString(),
+            }));
+            if (history.length < 2) {
+              return (
+                <p className="text-slate-400 text-sm">
+                  Your posture history builds as you update the assessment. Once your overall score
+                  changes, the trend will chart here.
+                </p>
+              );
+            }
+            const w = 600;
+            const h = 120;
+            const pad = 8;
+            const xs = (i: number) => pad + (i * (w - 2 * pad)) / (history.length - 1);
+            const ys = (v: number) => h - pad - (v / 100) * (h - 2 * pad);
+            const points = history.map((p, i) => `${xs(i)},${ys(p.score)}`).join(" ");
+            const first = history[0];
+            const last = history[history.length - 1];
+            const label = `Compliance posture trend across ${history.length} snapshots, from ${first.score}% on ${first.at} to ${last.score}% on ${last.at}.`;
+            return (
+              <div>
+                <svg
+                  viewBox={`0 0 ${w} ${h}`}
+                  className="w-full h-32"
+                  role="img"
+                  aria-label={label}
+                  preserveAspectRatio="none"
+                >
+                  <polyline
+                    points={points}
+                    fill="none"
+                    stroke="#f59e0b"
+                    strokeWidth={2}
+                    vectorEffect="non-scaling-stroke"
+                  />
+                  {history.map((p, i) => (
+                    <circle key={i} cx={xs(i)} cy={ys(p.score)} r={2.5} fill="#f59e0b" />
+                  ))}
+                </svg>
+                <div className="flex justify-between text-xs text-slate-400 mt-2">
+                  <span>{first.at}: {first.score}%</span>
+                  <span>{last.at}: {last.score}%</span>
+                </div>
+              </div>
+            );
+          })()}
         </Card>
 
         {/* Section Scores Grid */}
@@ -260,22 +409,54 @@ export default function Dashboard() {
                     <span className="text-sm text-slate-400">{100 - result.score}% gap</span>
                   </div>
                   <Progress value={result.score} className="h-1 mb-3" />
-                  <ul className="space-y-2">
+                  <ul className="space-y-3">
                     {(result.criticalGaps.length > 0 ? result.criticalGaps : result.gaps)
                       .slice(0, 3)
-                      .map((gap) => (
-                        <li key={gap} className="flex items-start gap-2 text-sm text-slate-300">
-                          <AlertTriangle
-                            className={
-                              result.criticalGaps.includes(gap)
-                                ? "text-red-500 flex-shrink-0 mt-0.5"
-                                : "text-yellow-500 flex-shrink-0 mt-0.5"
-                            }
-                            size={14}
-                          />
-                          <span>{gap}</span>
-                        </li>
-                      ))}
+                      .map((gap) => {
+                        const isCritical = result.criticalGaps.includes(gap);
+                        const guidance = REQUIREMENT_GUIDANCE[gap.requirementCode];
+                        return (
+                          <li
+                            key={gap.requirementCode}
+                            className="rounded-lg border border-slate-700 bg-slate-900/40 p-4"
+                          >
+                            <div className="flex items-start gap-2">
+                              <AlertTriangle
+                                className={
+                                  isCritical
+                                    ? "text-red-500 flex-shrink-0 mt-0.5"
+                                    : "text-yellow-500 flex-shrink-0 mt-0.5"
+                                }
+                                size={16}
+                                aria-hidden="true"
+                              />
+                              <div className="min-w-0 flex-1">
+                                <div className="flex flex-wrap items-center gap-2 mb-1">
+                                  <span className="font-medium text-slate-100">{gap.title}</span>
+                                  <span className="rounded bg-slate-700 px-2 py-0.5 text-xs font-mono text-slate-200">
+                                    {gap.citation}
+                                  </span>
+                                </div>
+                                <p className="text-xs font-medium text-amber-300 mb-2">
+                                  {triggeringAnswerLabel(gap)}
+                                </p>
+                                {guidance?.whyItMatters && (
+                                  <p className="text-sm text-slate-300 mb-1">
+                                    <span className="font-semibold text-slate-200">Why it matters: </span>
+                                    {guidance.whyItMatters}
+                                  </p>
+                                )}
+                                {guidance?.fix && (
+                                  <p className="text-sm text-slate-300">
+                                    <span className="font-semibold text-slate-200">The fix: </span>
+                                    {guidance.fix}
+                                  </p>
+                                )}
+                              </div>
+                            </div>
+                          </li>
+                        );
+                      })}
                   </ul>
                 </div>
               ))}

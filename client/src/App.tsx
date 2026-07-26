@@ -8,10 +8,16 @@ import Home from "./pages/Home";
 import Signup from "./pages/Signup";
 import Login from "./pages/Login";
 import Dashboard from "./pages/Dashboard";
+import Summary from "./pages/Summary";
+import Architecture from "./pages/Architecture";
 import Wizard from "./pages/Wizard";
 import Documents from "./pages/Documents";
+import Policies from "./pages/Policies";
+import Evidence from "./pages/Evidence";
+import Tasks from "./pages/Tasks";
 import Pricing from "./pages/Pricing";
 import Profile from "./pages/Profile";
+import AppFooter from "./components/AppFooter";
 
 const base = import.meta.env.BASE_URL.replace(/\/$/, '');
 
@@ -23,9 +29,14 @@ function AppRouter() {
         <Route path={"/signup"} component={Signup} />
         <Route path={"/login"} component={Login} />
         <Route path={"/dashboard"} component={Dashboard} />
+        <Route path={"/summary"} component={Summary} />
+        <Route path={"/architecture"} component={Architecture} />
         <Route path={"/profile"} component={Profile} />
         <Route path={"/wizard"} component={Wizard} />
         <Route path={"/documents"} component={Documents} />
+        <Route path={"/policies"} component={Policies} />
+        <Route path={"/evidence"} component={Evidence} />
+        <Route path={"/tasks"} component={Tasks} />
         <Route path={"/pricing"} component={Pricing} />
         <Route path={"/404"} component={NotFound} />
         <Route component={NotFound} />
@@ -48,6 +59,7 @@ function App() {
         <TooltipProvider>
           <Toaster />
           <AppRouter />
+          <AppFooter />
         </TooltipProvider>
       </ThemeProvider>
     </ErrorBoundary>

@@ -21,6 +21,8 @@ type ProfileForm = {
   rooftopCount: string;
   qualifiedIndividual: string;
   qiEmail: string;
+  logoUrl: string;
+  consumerCount: string;
 };
 
 const emptyForm: ProfileForm = {
@@ -32,6 +34,8 @@ const emptyForm: ProfileForm = {
   rooftopCount: "1",
   qualifiedIndividual: "",
   qiEmail: "",
+  logoUrl: "",
+  consumerCount: "",
 };
 
 export default function Profile() {
@@ -54,6 +58,11 @@ export default function Profile() {
       rooftopCount: String(dealershipQuery.data.rooftopCount || 1),
       qualifiedIndividual: dealershipQuery.data.qualifiedIndividual || "",
       qiEmail: dealershipQuery.data.qiEmail || "",
+      logoUrl: dealershipQuery.data.logoUrl || "",
+      consumerCount:
+        dealershipQuery.data.consumerCount != null
+          ? String(dealershipQuery.data.consumerCount)
+          : "",
     });
   }, [dealershipQuery.data]);
 
@@ -96,7 +105,10 @@ export default function Profile() {
 
     const name = form.name.trim();
     const qiEmail = form.qiEmail.trim();
+    const logoUrl = form.logoUrl.trim();
     const rooftopCount = Number(form.rooftopCount);
+    const consumerCountRaw = form.consumerCount.trim();
+    const consumerCount = consumerCountRaw === "" ? null : Number(consumerCountRaw);
 
     if (!name) {
       toast.error("Dealership name is required");
@@ -106,8 +118,16 @@ export default function Profile() {
       toast.error("Rooftop count must be at least 1");
       return;
     }
+    if (consumerCount !== null && (!Number.isInteger(consumerCount) || consumerCount < 0)) {
+      toast.error("Consumer count must be a whole number (or left blank)");
+      return;
+    }
     if (qiEmail && !emailPattern.test(qiEmail)) {
       toast.error("Enter a valid Qualified Individual email");
+      return;
+    }
+    if (logoUrl && !/^https?:\/\/.+/i.test(logoUrl)) {
+      toast.error("Logo URL must start with http:// or https://");
       return;
     }
 
@@ -120,6 +140,8 @@ export default function Profile() {
       rooftopCount,
       qualifiedIndividual: form.qualifiedIndividual.trim(),
       qiEmail,
+      logoUrl,
+      consumerCount,
     };
 
     if (dealershipQuery.data) {
@@ -132,7 +154,7 @@ export default function Profile() {
   return (
     <div className="min-h-screen bg-gradient-to-br from-slate-900 via-slate-800 to-slate-900">
       <div className="border-b border-slate-700 bg-slate-900/50 backdrop-blur">
-        <div className="container mx-auto px-4 py-6 flex justify-between items-center">
+        <div className="container mx-auto px-4 py-6 flex flex-wrap items-center justify-between gap-4">
           <div>
             <h1 className="text-3xl font-bold text-white">Dealership Profile</h1>
             <p className="text-slate-400">These details appear in your WISP and board report.</p>
@@ -230,6 +252,45 @@ export default function Profile() {
                   onChange={(event) => setField("qiEmail", event.target.value)}
                   placeholder="jane@dealership.com"
                 />
+              </div>
+
+              <div className="md:col-span-2 space-y-2">
+                <Label htmlFor="logoUrl" className="text-slate-300">Logo URL (optional)</Label>
+                <Input
+                  id="logoUrl"
+                  type="url"
+                  inputMode="url"
+                  value={form.logoUrl}
+                  onChange={(event) => setField("logoUrl", event.target.value)}
+                  placeholder="https://cdn.dealership.com/logo.png"
+                  aria-describedby="logoUrl-hint"
+                />
+                <p id="logoUrl-hint" className="text-sm text-slate-400">
+                  Shown next to your dealership name in the dashboard header. Leave blank to display
+                  the name only. Generated PDFs always use your dealership name, not the image.
+                </p>
+              </div>
+
+              <div className="md:col-span-2 space-y-2">
+                <Label htmlFor="consumerCount" className="text-slate-300">
+                  How many consumers&rsquo; information do you maintain?
+                </Label>
+                <Input
+                  id="consumerCount"
+                  type="number"
+                  min={0}
+                  step={1}
+                  value={form.consumerCount}
+                  onChange={(event) => setField("consumerCount", event.target.value)}
+                  placeholder="e.g. 3200 (leave blank if unsure)"
+                  aria-describedby="consumerCount-hint"
+                />
+                <p id="consumerCount-hint" className="text-sm text-slate-400">
+                  Maintaining information on fewer than 5,000 consumers may qualify your
+                  dealership for the 16 CFR &sect;314.6 exemption, which drops a few Safeguards
+                  requirements. Leave blank if you&rsquo;re not sure &mdash; nothing is exempted
+                  until you enter a number.
+                </p>
               </div>
             </div>
 

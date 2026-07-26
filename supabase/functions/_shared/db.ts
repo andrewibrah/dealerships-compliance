@@ -1,10 +1,11 @@
 import { drizzle } from 'npm:drizzle-orm/postgres-js';
 import postgres from 'npm:postgres';
-import { eq, and, asc, inArray, sql } from 'npm:drizzle-orm';
+import { eq, and, asc, desc, inArray, sql } from 'npm:drizzle-orm';
 import { ENV } from './env.ts';
 import {
   users, dealerships, complianceAnswers, subscriptions, generatedDocuments, auditLog,
   requirements, controls, risks, evidence, evidenceControls, tasks, policies, assets, dataFlows, attestations,
+  postureSnapshots,
   type User, type Dealership, type ComplianceAnswer, type Subscription, type GeneratedDocument,
   type Requirement, type Control, type Risk, type Evidence, type Task, type Policy,
   type Asset, type DataFlow, type Attestation,
@@ -17,6 +18,7 @@ import { writeAuditSafely, type AuditEventInput } from '../../../shared/audit.ts
 const SCHEMA = {
   users, dealerships, complianceAnswers, subscriptions, generatedDocuments, auditLog,
   requirements, controls, risks, evidence, evidenceControls, tasks, policies, assets, dataFlows, attestations,
+  postureSnapshots,
 };
 
 function getDb() {
@@ -338,6 +340,44 @@ export function updateTask(
   });
 }
 
+// Posture snapshots — crown-jewel tenant data: point-in-time posture history (PRD #33).
+// TenantScope-only, append-only. Mirror of server/db.ts; the save path records a row only when
+// the overall score changes (dedup in shared/posture.ts).
+export function listPostureSnapshots(scope: TenantScope) {
+  return scoped(scope.userId, async (tx) =>
+    tx
+      .select()
+      .from(postureSnapshots)
+      .where(eq(postureSnapshots.dealershipId, scope.dealershipId))
+      .orderBy(asc(postureSnapshots.createdAt)),
+  );
+}
+
+export function getLatestPostureSnapshot(scope: TenantScope) {
+  return scoped(scope.userId, async (tx) => {
+    const [row] = await tx
+      .select()
+      .from(postureSnapshots)
+      .where(eq(postureSnapshots.dealershipId, scope.dealershipId))
+      .orderBy(desc(postureSnapshots.createdAt))
+      .limit(1);
+    return row ?? null;
+  });
+}
+
+export function createPostureSnapshot(
+  scope: TenantScope,
+  input: Omit<typeof postureSnapshots.$inferInsert, 'id' | 'dealershipId' | 'createdAt'>,
+) {
+  return scoped(scope.userId, async (tx) => {
+    const [row] = await tx
+      .insert(postureSnapshots)
+      .values({ ...input, dealershipId: scope.dealershipId })
+      .returning();
+    return row;
+  });
+}
+
 // Policies — crown-jewel tenant data: written policies/procedures (PRD #22/#26).
 // TenantScope-only (mirrors server/db.ts); updatePolicy re-filters by dealership.
 export function listPolicies(scope: TenantScope) {
@@ -476,6 +516,21 @@ export function appendAuditLog(event: AuditEventInput): Promise<void> {
   return writeAuditSafely(async (record) => {
     await getDb().insert(auditLog).values(record);
   }, event);
+}
+
+// Audit trail READ — tenant-scoped, read-only (PRD #34/#36). Mirrors server/db.ts: the
+// audit_log table is append-only, so there is deliberately NO write/update/delete accessor.
+// Returns the dealership's own audit rows newest-first, capped, for the Examiner Package
+// extract. Filtered by dealership_id so a caller can only ever read their own tenant's rows.
+export function listAuditLog(scope: TenantScope, limit = 200) {
+  return scoped(scope.userId, async (tx) =>
+    tx
+      .select()
+      .from(auditLog)
+      .where(eq(auditLog.dealershipId, scope.dealershipId))
+      .orderBy(desc(auditLog.createdAt))
+      .limit(limit),
+  );
 }
 
 export type { User, Dealership, ComplianceAnswer, Subscription, GeneratedDocument, Requirement, Control, Risk, Evidence, Task, Policy, Asset, DataFlow, Attestation };
