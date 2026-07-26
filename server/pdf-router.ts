@@ -44,7 +44,7 @@ function flattenAnswers(rows: { answers: unknown }[]): Record<string, AnswerValu
 
 /**
  * Optional expert prose per domain (Phase 2 #20, P1). Passthrough — the deterministic per-domain
- * narrative — when ANTHROPIC_API_KEY is absent (the default in this deployment), so output is
+ * narrative — when no LLM key is configured, so output is
  * identical with or without the key. The prose NEVER changes a score/status/citation/finding; the
  * PDF always renders the structured findings and this text is only a narrative paragraph. The DMS
  * vendor (dealer-supplied) is passed as UNTRUSTED context for the vendor/AI domains.

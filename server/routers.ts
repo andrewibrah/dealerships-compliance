@@ -309,7 +309,7 @@ export const appRouter = router({
   // Optional conversational phrasing (PRD #11/#39) — DISPLAY ONLY. A QUERY: it writes
   // nothing (no audit). It rephrases ONE server-owned question's text; the model NEVER
   // decides an answer, status, score, or citation. Returns { text } only. Passthrough
-  // (original text) when ANTHROPIC_API_KEY is absent. Mirrored in the Deno router.
+  // (original text) when no LLM key is configured. Mirrored in the Deno router.
   interview: router({
     rephrase: protectedProcedure
       .input(z.object({ questionId: z.string() }))

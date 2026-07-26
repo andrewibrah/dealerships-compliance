@@ -124,7 +124,7 @@ export interface ArchitectureDomain {
   /** Advisory, clearly non-authoritative findings — ONLY the AI & Emerging Tech domain. */
   advisoryFindings: string[];
   /** Deterministic expert-narrative template — the fallback the optional LLM prose layer
-   *  rephrases (and the exact text shown when ANTHROPIC_API_KEY is absent). */
+   *  rephrases (and the exact text shown when no LLM key is configured). */
   narrative: string;
 }
 
