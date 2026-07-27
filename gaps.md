@@ -2,7 +2,7 @@
 
 - **Repo:** `dealerships-compliance` (FTC Safeguards Rule compliance SaaS for franchised auto dealers)
 - **Stack detected:** TypeScript monorepo. React 19 + Vite + Tailwind 4 + shadcn/radix + wouter (client); tRPC 11 over Express (local dev) and Supabase Deno Edge Functions (production); Drizzle ORM over Supabase Postgres; Supabase Auth (email/password); Stripe billing; pdf-lib document generation; Vitest tests; GitHub Pages (frontend) + Supabase (API) deploy.
-- **Analysis date:** 2026-07-21
+- **Analysis date:** 2026-07-21 (last updated 2026-07-27 after the Phases 1–3 front-facing build)
 - **PRD version:** `prd.md`, uncommitted working copy as of 2026-07-21 (68 numbered requirements, groups A–M, with a flagged "critical path to first paying dealer").
 - **Method:** Every status below cites a real `path:line`. Anything not locatable in code is **Missing**, never assumed.
 
@@ -10,19 +10,23 @@
 
 ## 1. Executive summary
 
-The shipped product is a **single-tenant FTC Safeguards self-assessment questionnaire with deterministic scoring and two generated PDFs (WISP, board report), gated behind Stripe billing.** That is a real, coherent slice of the PRD's Rule-Matcher + Builder + basic Dashboard. What is largely absent is everything that makes it a *compliance system of record*: the core object model, an audit trail, evidence storage, MFA, database-level tenant isolation, citation-level explainability, and the risk-assessment / incident-response artifacts the Rule itself mandates.
+*(Updated 2026-07-27.)* The shipped product is now a **single-tenant FTC Safeguards compliance system of record**: a scope-aware self-assessment (§314.6 exemption honoured) whose answers persist as first-class `Control` rows; deterministic, citation-grounded gap analysis where every finding carries its §314.4 citation + the triggering answer + why-it-matters + the fix; seven generated artifacts (WISP, board report, Written Risk Assessment, Security Architecture Assessment, Incident Response Plan, five policy types, Examiner Package); a remediation task board derived idempotently from open controls; an evidence repository with tenant-scoped uploads and control linking; posture history over time; an append-only audit trail; MFA; and an app-layer tenant guard with RLS live on every table — all gated behind Stripe billing.
+
+What remains is chiefly **structural rather than functional**: the regulation is still TypeScript rather than versioned content (#5/#6), tenancy is single-owner with no dealer-group/rooftop hierarchy (#2) and no compliance-role RBAC (#42), there is no recurrence/notification engine (#35/#43), and data retention/deletion is undefined (#56).
 
 | Severity | Count | Themes |
 |---|---|---|
 | **Critical** | 2 | Audit trail #34/#51 is deployed with DB enforcement validated; authenticated user-flow/Data-API validation remains. *(MFA #47 closed — see `.claude/tasks/done/0001-mfa-enforcement.md`.)* |
-| **High** | 9 | law-as-data (#5/#6), explainability/citations (#19), risk-assessment & IRP generators (#20/#23), evidence repo (#31), RLS/tenant isolation (#46), remediation tasks (#24), multi-tenant groups (#2) |
-| **Medium** | ~24 | Adaptive/LLM interview (#10/#11), posture history (#33), recurrence engine (#35), RBAC views (#42), encryption posture doc (#54), retention/deletion (#56), … |
-| **Low** | ~28 | Crosswalks (#8), DMS connectors (#59), SSO (#47-part), white-label (#45), eval harness (#63), observability (#67), separate repos (#65), … |
-| **Implemented** | 4 | Scope lock (#1), core object model (#3, 2026-07-22), WISP generator (#21), deterministic rule engine separate from LLM (#49) |
+| **High** | 3 | law-as-data (#5/#6), RLS/tenant isolation (#46 — policies live, flag-gated), multi-tenant groups (#2) |
+| **Medium** | ~19 | Recurrence engine (#35/#43), RBAC views (#42), encryption posture doc (#54), retention/deletion (#56), attestation flow (#29), onboarding (#37), … |
+| **Low** | ~26 | Crosswalks (#8), DMS connectors (#59), SSO (#47-part), eval harness (#63), observability (#67), separate repos (#65), … |
+| **Implemented** | 21 | Scope lock (#1), object model (#3), applicability (#7), adaptive/LLM interview (#10/#11), explainability (#19), risk assessment (#20), WISP (#21), policy generators (#22), IRP (#23), tasks + board (#24/#40), evidence checklist (#25), doc lifecycle (#26), teaching content (#27), signature output (#30), evidence repo + linking (#31/#32), posture history (#33), examiner package (#36), dashboard (#38), interview UX (#39), rule engine (#49), white-label (#45), responsive (#44), trust-boundary disclaimer (#4) |
 
-**The single most important structural finding (now addressed):** the app modeled compliance as `compliance_answers.answers` JSONB blobs keyed by question id. PRD #3's first-class object model (Control, Requirement, Risk, Evidence, Task, Policy, Asset, DataFlow, Attestation) is now **modeled** (`drizzle/schema.ts`, migrations `0005–0007`, branch `feat/prd3-object-model`) — tenant-scoped, audited, RLS on every table. The remaining half is wiring: the questionnaire still writes/reads JSONB (`deriveControlsFromAnswers` exists but isn't yet in the save/scoring path), so the downstream gaps (citations #19, risk assessment #20, tasks #24, evidence #31) are now **unblocked** but not yet realized.
+**The single most important structural finding (now CLOSED, 2026-07-27):** the app modeled compliance as `compliance_answers.answers` JSONB blobs keyed by question id. PRD #3's object model was modeled on 2026-07-22, and the **JSONB→Control cutover is now wired** (`2d09da1`): `compliance.saveSection`/`saveAnswer` upsert derived `Control` rows in both runtimes, and `shared/derivation.ts` — proven byte-equivalent to `shared/scoring.ts` by `server/derivation.test.ts` — is the gap/citation spine. Everything it blocked (citations #19, risk assessment #20, IRP #23, tasks #24, evidence #31/#32, checklist #25, posture #33) shipped in the same session and is merged to `main`.
 
-**Latent/dead code worth knowing:** `invokeLLM` (`server/_core/llm.ts:143`), `generateGapNarrative` (`shared/scoring.ts:141`), and `server/email-service.ts` (Resend) are all defined but **never called/imported** anywhere. There is no live LLM path and no live email/notification path today.
+**Deployment status (2026-07-27):** migrations `0001`–`0012` are applied to the linked Supabase project and reconciled in `supabase_migrations.schema_migrations` (`supabase migration list --linked` shows nothing pending); 17 tables; RLS enabled+forced with a policy on every tenant table; both storage buckets (`documents`, `evidence`) are **private**.
+
+**Latent/dead code worth knowing:** `invokeLLM` (`server/_core/llm.ts:143`), `generateGapNarrative` (`shared/scoring.ts:141`), and `server/email-service.ts` (Resend) are all still defined but **never called/imported**. Note the LLM path is no longer absent — but it deliberately bypasses `_core/llm.ts`: the two display-only surfaces (`shared/interview-phrasing.ts`, `shared/architecture-narrative.ts`) go through `shared/llm-provider.ts` (OpenAI primary, Anthropic fallback, deterministic passthrough with neither). `email-service.ts` remains the seed for the recurrence engine (#35/#43).
 
 ---
 
@@ -36,16 +40,16 @@ Status legend: **Implemented** / **Partial** / **Missing** / **Divergent**. Seve
 |---|---|---|---|---|---|---|
 | 1 ★ | Lock scope to FTC Safeguards × franchised auto dealers | Implemented | `shared/safeguards-questions.ts:1-22`; `shared/pdf-generator.ts:171-182` | None | — | Keep; document the scope lock in CLAUDE.md |
 | 2 ★ | Multi-tenant from line one: dealer groups own multiple rooftops; rooftop-scoped, group-aggregatable | Divergent | `drizzle/schema.ts:18-31` (one `user_id` owner + `rooftop_count` int); `server/routers.ts:16-31,46-47` (`getDealershipByUserId`, singular) | No group entity; one dealership per user; `rooftop_count` is a number, not scoped data | High | Introduce `dealer_group` → `rooftop` hierarchy; scope all business rows to rooftop, aggregate to group |
-| 3 | Core compliance object model (Control, Requirement, Risk, Evidence, Task, Policy, Asset, DataFlow, Attestation) | Implemented (2026-07-22) | All 9 entities + `evidence_controls` join in `drizzle/schema.ts`; migrations `0005–0007`; tenant-scoped accessors + procedures in both runtimes; global §314.4 catalog `shared/requirements.ts`. Branch `feat/prd3-object-model` (`db546a9`) | Model complete, audited, RLS on every table; questionnaire JSONB→Control cutover not yet wired; migrations pending prod apply | — | Wire `deriveControlsFromAnswers` into save + move scoring to Controls — see `.claude/tasks/done/0004-object-model.md` |
-| 4 | Trust boundary: software produces a program, not the auditor/lawyer (drives disclaimers/UI) | Partial | `shared/pdf-generator.ts:265` ("Confidential — for internal, board, auditor, and regulator use"); no "not legal advice" surface in UI | No explicit disclaimer/ToS in the app UI; liability posture implicit | Med | Add a persistent "not legal advice / you remain responsible" disclaimer in UI + generated docs |
+| 3 | Core compliance object model (Control, Requirement, Risk, Evidence, Task, Policy, Asset, DataFlow, Attestation) | Implemented (2026-07-27) | All 9 entities + `evidence_controls` join in `drizzle/schema.ts`; migrations `0005–0012` APPLIED to prod; JSONB→Control cutover wired in both runtimes (`2d09da1`); `shared/derivation.ts` is the gap/citation spine | None | — | Keep; `shared/scoring.ts` stays the displayed scorer (proven equivalent) |
+| 4 | Trust boundary: software produces a program, not the auditor/lawyer (drives disclaimers/UI) | Implemented (2026-07-27) | App-wide `<footer>` (`client/src/components/AppFooter.tsx`) on every page + `ASSESSMENT_DISCLAIMER` embedded top+bottom of every generated PDF (`shared/pdf-generator.ts`) | None | — | Keep; revisit wording with counsel |
 
 ### B. Regulatory brain — "law as data"
 
 | # | Requirement | Status | Evidence (path:line) | Gap | Sev | Recommended action |
 |---|---|---|---|---|---|---|
-| 5 ★ | Decompose Safeguards into atomic, individually-testable control requirements | Partial | `shared/safeguards-questions.ts:22-380` (9 sections × 5 yes/no questions, weighted) | Questions ≠ controls; no per-control citation/applicability; coarse (45 Qs for all of §314.4) | High | Re-express as a control catalog: each control = citation + test + weight + applicability |
+| 5 ★ | Decompose Safeguards into atomic, individually-testable control requirements | Partial | `shared/requirements.ts` — 45-row `REQUIREMENT_CATALOG` (v2), each with a per-requirement §314.4 citation, weight, and authored why/fix; Controls persisted per requirement | Catalog is derived from the 45 questions and still lives in TS, not versioned content (see #6) | High | Externalize with #6; split any question covering two obligations |
 | 6 ★ | Store regulation as versioned structured data (YAML/JSON) — effective dates, citations, applicability | Missing | `shared/safeguards-questions.ts` is a hardcoded TS array; no dates/citations/versioning | Law is code, not data; cannot update the rule without a redeploy | High | Externalize to versioned content (JSON/YAML) with citations, effective dates, applicability conditions |
-| 7 | Applicability engine (<5,000-consumer exemption, systems, data types) | Missing | No applicability logic; all 9 sections always render (`client/src/pages/Wizard.tsx:35-38`) | Every dealer gets every question; exemption ignored | Med | Add applicability rules keyed on dealer profile; filter controls before interview |
+| 7 | Applicability engine (<5,000-consumer exemption, systems, data types) | Implemented (2026-07-27) | `shared/applicability.ts` encodes §314.6(a) — exempts exactly §314.4(b)(1),(d)(2),(h),(i) (12 codes); opt-in via nullable `dealerships.consumer_count` (migration `0010`); Wizard skips out-of-scope questions | Opt-in only; broader applicability (systems/data types) still open under #6 | Low | Extend once law-as-data (#6) expresses applicability as data |
 | 8 | Crosswalk layer (NIST CSF 2.0 / PCI DSS / CMMC), schema-ready | Missing | none | No crosswalk schema | Low | Defer (v2); reserve a `control_mapping` table when object model lands |
 | 9 | Regulatory update pipeline (human-reviewed, re-notify tenants) | Missing | none | No update/notify process | Low | Defer; depends on #6 content versioning |
 
@@ -53,10 +57,10 @@ Status legend: **Implemented** / **Partial** / **Missing** / **Divergent**. Seve
 
 | # | Requirement | Status | Evidence (path:line) | Gap | Sev | Recommended action |
 |---|---|---|---|---|---|---|
-| 10 ★ | Adaptive questionnaire with branching + skip logic | Missing | `client/src/pages/Wizard.tsx:31-38` iterates all sections/questions by index; no branching | Static linear form; asks irrelevant questions | Med | Add a question graph with skip/branch driven by prior answers + applicability (#7) |
-| 11 ★ | Conversational LLM front-end over a structured question graph | Missing | `server/_core/llm.ts:143` (`invokeLLM`) never called; Wizard uses fixed buttons (`Wizard.tsx:13-22`) | No conversational layer | Med | Wire an LLM phrasing layer over the graph; graph guarantees coverage |
+| 10 ★ | Adaptive questionnaire with branching + skip logic | Implemented (2026-07-27) | `client/src/pages/Wizard.tsx` skips applicability-excluded questions with a visible "§314.6 does not apply" affordance; radiogroup a11y preserved | Skips are applicability-driven; no answer-conditional branching yet | Low | Add answer-conditional branches only where the Rule warrants |
+| 11 ★ | Conversational LLM front-end over a structured question graph | Implemented (2026-07-27) | `interview.rephrase` (both runtimes) → `shared/interview-phrasing.ts` via `shared/llm-provider.ts` (OpenAI primary). DISPLAY-ONLY: returns `{ text }` only, passthrough without a key, untrusted context delimiter-wrapped | Structured buttons remain the only state writers (by design) | — | Keep the guardrail; never let the model set a value |
 | 12 | Evidence-aware questioning (don't ask what an integration can detect) | Missing | no integrations (#59/#60) | Every question asked manually | Low | Defer; depends on connectors |
-| 13 | Asset + data-flow discovery | Partial (2026-07-22) | `assets` + `data_flows` entities modeled (#3; `drizzle/schema.ts`, migration `0007`) with tenant-scoped CRUD in both runtimes | Entities exist; no capture UI and not yet wired into risk assessment (#20) | Med | Build the asset/data-flow capture UX on the new entities; feed #20 |
+| 13 | Asset + data-flow discovery | Partial | `assets` + `data_flows` entities (migration `0007`) + tenant-scoped CRUD both runtimes; consumed by the Risk Assessment + Security Architecture generators | Entities + consumers exist; still no dedicated capture UI | Med | Build the asset/data-flow capture UX |
 | 14 ★ | Multi-stakeholder, multi-session; save/resume everywhere | Partial | Save/resume: `compliance_answers` unique on `(dealership_id, section)` (`schema.ts:46`); `Wizard.tsx:44-52` reloads. But one `user_id` per dealership (`schema.ts:20`) | Save/resume works; no multi-stakeholder (QI vs IT) roles | Med | Add per-rooftop membership + roles so multiple stakeholders answer their sections |
 | 15 | Confidence + clarification loop (re-ask low-confidence) | Missing | no LLM/confidence anywhere | None | Low | Defer; depends on #11 |
 
@@ -64,56 +68,56 @@ Status legend: **Implemented** / **Partial** / **Missing** / **Divergent**. Seve
 
 | # | Requirement | Status | Evidence (path:line) | Gap | Sev | Recommended action |
 |---|---|---|---|---|---|---|
-| 16 ★ | Map answers → applicable controls → gaps, deterministically | Partial | `shared/scoring.ts:47-94` (`calculateSectionScore` derives gaps deterministically) | Deterministic ✓, but "applicable" = all questions (no #7); gap = unanswered/"no" | Med | Keep determinism; add applicability so only in-scope controls are matched |
+| 16 ★ | Map answers → applicable controls → gaps, deterministically | Implemented (2026-07-27) | `shared/derivation.ts` (proven ≡ `scoring.ts` in `server/derivation.test.ts`) over the applicability-filtered catalog; Controls upserted on save in both runtimes | None | — | Keep deterministic |
 | 17 ★ | Hybrid: deterministic engine for pass/fail, LLM only for phrasing; never hallucinate status | Partial | `shared/scoring.ts` pure/deterministic; LLM path absent (`llm.ts` unused) | Safety property holds (no hallucination possible); the LLM-phrasing half is absent | Low | Add LLM strictly for narrative, never for status; enforce grounding (#62) |
-| 18 ★ | Gap severity scoring (mandatory vs best-practice vs informational) | Partial | `shared/scoring.ts:14-18,71-79` (critical/important/standard; `criticalGaps`) | Maps loosely; not tied to regulatory-mandatory vs best-practice taxonomy/citations | Med | Bind severity to control metadata (mandatory vs recommended) from #6 |
-| 19 ★ | Explainability: every gap traces to a specific citation + the triggering answer | Partial | Gaps are bare question text (`scoring.ts:71`); section descriptions name elements but no per-gap §314.4 citation | No citation on gaps; "non-negotiable" per PRD | High | Attach §314.4(x) citation + triggering answer to every gap/finding |
-| 20 ★ | Written risk assessment generation — first-class artifact | Missing | `shared/pdf-generator.ts` produces WISP + board report only; Section 2 asks *if* one exists (`safeguards-questions.ts:64-101`) but generates none | The Rule mandates a written risk assessment; product doesn't produce it | High | Add a Risk Assessment generator (assets + threats + vulns → written RA doc) |
+| 18 ★ | Gap severity scoring (mandatory vs best-practice vs informational) | Partial | `shared/scoring.ts:14-18` weights + `criticalGaps`; each gap now carries its own §314.4 citation via `shared/derivation.ts` | Severity is weight-derived, still not a mandatory/recommended taxonomy from the rule text | Med | Bind severity to control metadata from #6 |
+| 19 ★ | Explainability: every gap traces to a specific citation + the triggering answer | Implemented (2026-07-27) | Every gap on the Dashboard, `/summary`, WISP, board report and Examiner Package renders §314.4 citation + triggering answer + why-it-matters + fix (`shared/derivation.ts`, `REQUIREMENT_GUIDANCE`, `writeGapDetail`) | None — no gap renders as bare question text anywhere | — | Keep; citations are human-authored, never LLM |
+| 20 ★ | Written risk assessment generation — first-class artifact | Implemented (2026-07-27) | `generateRiskAssessment` (`shared/pdf-generator.ts`) + `pdf.generateRiskAssessment` both runtimes, paid-gated, disclaimer embedded; driven by Risk/Asset/DataFlow + answers | Quality scales with entity capture (#13) | — | Enrich as the asset/data-flow UX lands |
 | 21 ★ | WISP generator | Implemented | `shared/pdf-generator.ts:173-269` (`generateWISP`); `server/pdf-router.ts:20-36` (paid-gated) | None (quality scales with input completeness) | — | Keep; enrich once object model/citations land |
 
 ### E. Builder node
 
 | # | Requirement | Status | Evidence (path:line) | Gap | Sev | Recommended action |
 |---|---|---|---|---|---|---|
-| 22 | Policy/procedure generation (access control, encryption, MFA, disposal, change mgmt) | Missing | only WISP + board report exist (`pdf-generator.ts:173,274`) | No per-policy generators | Med | Add templated policy generators from control answers + org specifics |
-| 23 ★ | Incident Response Plan generator (§314.4(h)) | Missing | Section 7 asks if an IRP exists (`safeguards-questions.ts:261-300`); no generator | Rule-required artifact not produced | High | Add IRP generator (roles, procedure, 30-day breach-notification timeline) |
-| 24 ★ | Remediation roadmap: gaps → prioritized, assigned, dated tasks | Partial (2026-07-22) | `remediationPriorities` in PDFs (`pdf-generator.ts:156-168`) + `tasks` entity now persisted (#3; status/priority/owner/due/completed, FK to requirement/control), audited CRUD both runtimes | Task entity + tracking fields exist; no task board UI and no auto-derivation of tasks from gaps | High | Build the task board + derive tasks from open controls on the new entity |
-| 25 | Evidence-request checklist auto-generated per open control | Missing | none | No checklist | Med | Generate per-open-control evidence requests (depends on #3/#31) |
-| 26 | Document lifecycle: versioning, draft→review→approve, e-sign, immutable "adopted on" | Partial | `generated_documents.version` defaults 1 (`schema.ts:64`) and is **never incremented** (no `version` write in `server/db.ts`); no approval/e-sign/adopted-on | Static version; no workflow/immutability | Med | Add version bump + draft/review/approve states + adopted-on record |
+| 22 | Policy/procedure generation (access control, encryption, MFA, disposal, change mgmt) | Implemented (2026-07-27) | `shared/policy-templates.ts` (`POLICY_DEFINITIONS`) + `generatePolicy` (`shared/pdf-generator.ts`) + `pdf.generatePolicy` both runtimes; creates a draft `policies` row + PDF; cites (c)(1)/(c)(3)/(c)(5)/(c)(6)/(c)(7) | Posture is honest — no/partial/unanswered never render as "in place" | — | Add more policy types as needed |
+| 23 ★ | Incident Response Plan generator (§314.4(h)) | Implemented (2026-07-27) | `shared/incident-response.ts` covers all seven §314.4(h) elements + the FTC breach-notification duty at **§314.4(j)** (≥500 consumers, 30 days); `pdf.generateIncidentResponsePlan` both runtimes, paid-gated | None | — | Keep; §314.5 is only the effective-date section — never cite it for the duty |
+| 24 ★ | Remediation roadmap: gaps → prioritized, assigned, dated tasks | Implemented (2026-07-27) | `shared/task-derivation.ts` (open control → task, priority from weight, **idempotent** on `controlId`) + `tasks.deriveFromControls` both runtimes, audited; `/tasks` board with owner/due/status | None | — | Keep; wire evidence-attach in place next |
+| 25 | Evidence-request checklist auto-generated per open control | Implemented (2026-07-27) | `shared/evidence-checklist.ts` — one grounded request per open control (citation + `REQUIREMENT_GUIDANCE.fix`), applicability-aware; rendered on `/evidence` | None | — | Keep |
+| 26 | Document lifecycle: versioning, draft→review→approve, e-sign, immutable "adopted on" | Implemented (2026-07-27) | `shared/policy-lifecycle.ts` state machine (draft→in_review→approved→adopted, archived from any non-adopted; adopted terminal) + `policies.transition` both runtimes, audited; `adoptedAt` set-once and unreachable via `create`/`update` (`.strict()`, `server/policy-guard.test.ts`); `/policies` viewer | No e-signature | Low | Add e-sign if a pilot requires it |
 
 ### F. Teacher node
 
 | # | Requirement | Status | Evidence (path:line) | Gap | Sev | Recommended action |
 |---|---|---|---|---|---|---|
-| 27 | Per-control plain-language "why this exists / what breach it prevents" | Partial | `safeguards-questions.ts` optional `hint` fields (e.g. `:34,41,75`) | Hints are terse; not "why/what breach it prevents" | Low | Expand control metadata with a "why it matters" narrative field |
+| 27 | Per-control plain-language "why this exists / what breach it prevents" | Implemented (2026-07-27) | `REQUIREMENT_GUIDANCE` (`shared/requirements.ts:141`) — authored `whyItMatters` + `fix` for all 45; surfaced on Dashboard gaps, `/summary`, `/architecture`, `/evidence` checklist, and in PDFs | None (authored content, never LLM) | — | Keep |
 | 28 | Role-based training modules (QI vs front-desk vs F&I) | Missing | none | No training | Low | Defer (post-pilot moat) |
-| 29 | Staff attestation/acknowledgment tracking (§314.4(e)) | Partial (2026-07-22) | `attestations` entity modeled (#3; type/status/attestor/attested_at, FK to policy/requirement), audited CRUD both runtimes | Entity exists; no acknowledgment-collection flow/UI (send → attest → record) | Med | Build the attestation-collection flow on the new entity |
-| 30 ★ | Signature 10-minute output ("here's your risk, why it matters, here's the fix") | Partial | `client/src/pages/Dashboard.tsx:32-44` (score + section results); WISP remediation section | "Why it matters" narrative is thin; `generateGapNarrative` unused (`scoring.ts:141`) | Med | Deliver a concise risk→why→fix summary view/one-pager |
+| 29 | Staff attestation/acknowledgment tracking (§314.4(e)) | Partial | `attestations` entity + audited CRUD both runtimes (`server/routers.ts:930-1000`) | Entity + CRUD exist; still **zero client UI** (send → attest → record) | Med | Build the collection flow — design in NextWork Phase 4.4 |
+| 30 ★ | Signature 10-minute output ("here's your risk, why it matters, here's the fix") | Implemented (2026-07-27) | `/summary` one-pager (`client/src/pages/Summary.tsx`) — top gaps as risk → why → fix, printable; same grounded spine as the Dashboard | None | — | Keep |
 
 ### G. Librarian node
 
 | # | Requirement | Status | Evidence (path:line) | Gap | Sev | Recommended action |
 |---|---|---|---|---|---|---|
-| 31 ★ | Evidence repository (encrypted object storage) | Partial (2026-07-22) | `evidence` entity + `evidenceGetSignedUrl` (private `evidence` bucket) modeled (#3; migration `0006`), audited CRUD both runtimes | Entity + signed-URL path exist; the `evidence` bucket isn't created yet and there's no upload UI / signed-upload-URL wiring | High | Create the bucket + build upload UX; encryption = Supabase-managed at rest |
-| 32 | Evidence-to-control linking (one artifact → many controls) | Partial (2026-07-22) | `evidence_controls` join modeled (#3; unique(evidence_id,control_id), tenant-scoped) with `linkEvidenceToControl` / `listEvidenceForControl` | Join + accessors exist; no linking UI; composite-FK hardening on `control_id` pending | Med | Surface linking in UI; add the `(dealership_id, control_id)` composite FK |
-| 33 ★ | Continuous posture tracking (state over time) | Missing | scores computed on the fly (`Dashboard.tsx:32-44`, `pdf-generator.ts:55-69`); no history table | No historical snapshots; drift invisible | Med | Snapshot posture over time (score history per control/section) |
+| 31 ★ | Evidence repository (encrypted object storage) | Implemented (2026-07-27) | Private `evidence` bucket created; `evidence.getUploadUrl` mints a **server-derived** scoped key `evidence/<dealershipId>/<uuid>-<sanitized>` (path-traversal tested); `/evidence` upload + download via signed URLs; `evidence.create` rejects a path outside the tenant prefix | None | — | Keep; Supabase-managed encryption at rest |
+| 32 | Evidence-to-control linking (one artifact → many controls) | Implemented (2026-07-27) | `evidence_controls` join + `evidence.linkControl`/`listForControl`, surfaced per open control on `/evidence`; composite `(dealership_id, control_id)` FK added in migration `0008` | None | — | Keep |
+| 33 ★ | Continuous posture tracking (state over time) | Implemented (2026-07-27) | `posture_snapshots` (migration `0011`, RLS in-migration) written on save in both runtimes with a dedup rule (only when the overall score changes), audited; Dashboard sparkline (`role="img"` + aria-label) | None | — | Keep |
 | 34 ★ | Append-only audit trail of every change (who/what/when) | Partial (deployed 2026-07-21) | `audit_log` (`drizzle/schema.ts`) + remote migration `20260721172940_audit_log`; append-only triggers + SHA-256 chain validated transactionally as `service_role`; all three Edge Functions deployed; `shared/audit.ts` unit-tested | Real authenticated mutation and tenant-scoped Data-API read still need a user-flow smoke test | **Critical** | Run an authenticated mutation/read smoke test, then close — see `.claude/tasks/done/0003-audit-trail.md` |
 | 35 | Recurrence engine (annual RA, pen test, QI board report; auto-scheduled + nagged) | Missing | no scheduler; `server/email-service.ts` (Resend) defined but **never imported** | No recurrences/reminders | Med | Add scheduled recurrences + wire notifications |
-| 36 | Audit-ready export ("examiner package" / board report) | Partial | board report PDF (`pdf-generator.ts:274-359`) | Board report ✓; no combined examiner package (docs + evidence + audit trail) | Med | Bundle a one-click examiner package once #31/#34 exist |
+| 36 | Audit-ready export ("examiner package" / board report) | Implemented (2026-07-27) | `generateExaminerPackage` — cover + posture + document manifest + evidence index + a **real** audit-trail extract (`listAuditLog`, select-only, dealership-filtered; unit-tested for no fabrication); paid-gated both runtimes | Single PDF rather than a zip bundle (deliberate — no new dependency) | — | Add a zip bundle only if an examiner asks |
 
 ### H. UI/UX
 
 | # | Requirement | Status | Evidence (path:line) | Gap | Sev | Recommended action |
 |---|---|---|---|---|---|---|
 | 37 ★ | Onboarding that reaches first artifact fast | Partial | flow: `client/src/App.tsx:22-29` (Home→Signup→Wizard→Dashboard→Documents); dealership auto-created "My Dealership" (`server/routers.ts:20-30`) | No guided onboarding; profile is a stub | Med | Add a guided first-run that reaches a first artifact quickly |
-| 38 ★ | Dashboard: posture score, open gaps by severity, tasks, upcoming recurrences | Partial | `client/src/pages/Dashboard.tsx:32-44` (score + section results + gaps) | Score/gaps ✓; no tasks, no recurrences | Med | Add task + recurrence widgets (depends on #24/#35) |
-| 39 | Interview UX: chat + inline forms hybrid | Divergent | `Wizard.tsx:13-22` fixed buttons; no chat | Forms only | Low | Add chat lane over forms (depends on #11) |
-| 40 | Task board with ownership, due dates, evidence-attach in place | Missing | none | No task board | Med | Build once tasks persist (#24) |
-| 41 | Document viewer/editor with approval workflow | Partial | `client/src/pages/Documents.tsx` lists docs + signed URLs (`server/routers.ts:219-258`) | List/download ✓; no editor/approval | Low | Add approval surface (depends on #26) |
+| 38 ★ | Dashboard: posture score, open gaps by severity, tasks, upcoming recurrences | Implemented (2026-07-27) | `client/src/pages/Dashboard.tsx` — score card, section grid, grounded priority gaps, open-task widget, posture trend, nav to summary/architecture/evidence | Upcoming recurrences still missing (depends on #35) | Med | Add the recurrence widget with #35 |
+| 39 | Interview UX: chat + inline forms hybrid | Implemented (2026-07-27) | Optional conversational mode in `client/src/pages/Wizard.tsx` displaying LLM-rephrased question text; structured radiogroup/forms remain the ONLY state writers; degrades to plain forms without a key | None | — | Keep the guardrail |
+| 40 | Task board with ownership, due dates, evidence-attach in place | Implemented (2026-07-27) | `client/src/pages/Tasks.tsx` — title/priority/status/owner/due with inline edit, "Generate tasks from gaps" | Evidence-attach from the task row not yet wired (evidence links to controls) | Low | Surface control-linked evidence on the task row |
+| 41 | Document viewer/editor with approval workflow | Implemented (2026-07-27) | `client/src/pages/Policies.tsx` shows status/version/adoptedAt with lifecycle actions via `policies.transition`; `/documents` lists + signs generated PDFs | No in-app editor (content is generated) | Low | Add editing only if dealers ask |
 | 42 | Role-scoped views (owner / QI / staff / auditor) | Missing | only `user`/`admin` roles (`drizzle/schema.ts:6`); `adminProcedure` defined but unused (`server/_core/trpc.ts:30`) | No compliance-role RBAC | Med | Add owner/QI/staff/auditor roles + scoped views |
 | 43 | Notifications + reminders (email/in-app) driven by recurrence | Missing | `server/email-service.ts` never imported; no in-app notifications | No live notifications | Low | Wire email-service to recurrence engine (#35) |
-| 44 | Mobile-responsive | Partial | Tailwind responsive utilities throughout; a11y program (`client/src/__a11y__/`) | Not verified on device; assume partial | Low | Verify responsive breakpoints on real devices |
-| 45 | White-label / branding | Missing | fixed navy/gold theme (`client/src/App.tsx:37-47`) | No tenant branding | Low | Defer (v2) |
+| 44 | Mobile-responsive | Implemented (2026-07-27) | 375px pass: `flex-wrap` + gap on the Dashboard header container AND its 5-button action row, plus Tasks/Documents/Policies/Summary/Evidence headers and the Wizard radiogroup | Verified by class audit, not on a physical device | Low | Spot-check on a real handset |
+| 45 | White-label / branding | Implemented (2026-07-27) | Nullable `dealerships.logo_url` (migration `0012`, no default) + labelled `type=url` Profile field + Dashboard header brand; degrades to name-only. Scheme pinned to http(s) server-side in both runtimes (`logoUrlSchema`, `server/logo-url-guard.test.ts`) | Logo is client-rendered only — never fetched into PDFs (deliberate) | — | Add full theming only if a dealer group asks |
 
 ### I. Backend / system architecture
 
@@ -187,19 +191,24 @@ Sequenced by **severity first, dependency second** (compliance ground rule: auth
    Remaining tail (→ next): JSONB→Control **cutover** (wire `deriveControlsFromAnswers` + move scoring),
    apply `0005–0007` to prod, create the `evidence` bucket, composite-FK hardening. See
    `.claude/tasks/done/0004-object-model.md`. *(Unblocks #19, #20, #23, #24, #25, #29, #31–33.)*
-5. **Citation-level explainability** (every gap → §314.4 citation + triggering answer) — PRD #19/#62 — **High** — **M** *(needs #4/#6; #4 now modeled — `Requirement.citation` is the spine)*
-6. **Written Risk Assessment generator** (first-class, Rule-mandated artifact) — PRD #20/#13 — **High** — **M**
-7. **Incident Response Plan generator** (§314.4(h)) — PRD #23 — **High** — **M**
-8. **Persisted remediation tasks** (owner, due date, status, evidence link) + task board — PRD #24/#40 — **High** — **M** *(needs #4)*
-9. **Evidence repository + evidence-to-control linking** (encrypted storage) — PRD #31/#32 — **High** — **L** *(needs #4)*
-10. **Law-as-data**: externalize the regulation to versioned structured content (citations, effective dates, applicability) — PRD #6/#5 — **High** — **L**
-11. **Applicability engine** (<5,000-consumer exemption; systems/data types) — PRD #7 — **Med** — **M** *(needs #10)*
-12. **Continuous posture tracking** (historical snapshots, drift) — PRD #33 — **Med** — **M**
-13. **Recurrence engine + notifications** (annual RA, pen test, QI board report) — PRD #35/#43 — **Med** — **M** *(email-service.ts scaffold exists, unwired)*
-14. **Multi-tenant dealer groups + rooftop scoping/aggregation** — PRD #2 — **High** — **L**
+5. ~~**Citation-level explainability** (every gap → §314.4 citation + triggering answer) — PRD #19/#62~~
+   ✅ **Done (2026-07-27)** — `2d09da1`/`e4bc047`.
+6. ~~**Written Risk Assessment generator** — PRD #20/#13~~ ✅ **Done (2026-07-27)** — `a788c5a`.
+7. ~~**Incident Response Plan generator** (§314.4(h)) — PRD #23~~ ✅ **Done (2026-07-27)** — `f9e8635`
+   (breach duty cites **§314.4(j)**; a review caught an initial §314.5 error).
+8. ~~**Persisted remediation tasks** + task board — PRD #24/#40~~ ✅ **Done (2026-07-27)** — `a9b39ec`.
+9. ~~**Evidence repository + evidence-to-control linking** — PRD #31/#32~~ ✅ **Done (2026-07-27)** — `b4c377b`.
+10. **Law-as-data**: externalize the regulation to versioned structured content (citations, effective
+    dates, applicability) — PRD #6/#5 — **High** — **L** ← **NEXT** (see `.claude/tasks/NextWork.md`)
+11. ~~**Applicability engine** (<5,000-consumer exemption) — PRD #7~~ ✅ **Done (2026-07-27)** — `faf18c5`;
+    §314.6(a) exempt set is opt-in and test-pinned to 12 codes.
+12. ~~**Continuous posture tracking** — PRD #33~~ ✅ **Done (2026-07-27)** — `104ead5`.
+13. **Recurrence engine + notifications** (annual RA, pen test, QI board report) — PRD #35/#43 — **Med** — **M** *(`server/email-service.ts` scaffold still unwired; design in NextWork Phase 4.3)*
+14. **Multi-tenant dealer groups + rooftop scoping/aggregation** — PRD #2 — **High** — **L** *(sequence with RBAC #42 — both reshape tenancy)*
 15. **PII retention & deletion policy** (self-serve delete, TTLs, documented encryption posture) — PRD #56/#54 — **Med** — **M**
+16. **Attestation collection flow** — PRD #29 — **Med** — **S** *(entity + audited CRUD already shipped; UI only — design in NextWork Phase 4.4)*
 
-**Deferred long tail (Low):** RBAC compliance roles (#42), adaptive/LLM interview (#10/#11), policy generators (#22), crosswalks (#8), DMS connectors (#59), auto-evidence (#60), SSO (#47-part), white-label (#45), eval harness (#63), observability (#67), separate content package (#65), DOCX (#50), async queue (#52).
+**Deferred long tail (Low):** RBAC compliance roles (#42), guided onboarding (#37), crosswalks (#8), DMS connectors (#59), auto-evidence (#60), SSO (#47-part), eval harness (#63), observability (#67), separate content package (#65), DOCX (#50), async queue (#52), training modules (#28), vendor registry (#61).
 
 ---
 
