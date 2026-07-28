@@ -1,4 +1,5 @@
 import { Button } from "@/components/ui/button";
+import { SessionDataError } from "@/components/SessionDataError";
 import { Card } from "@/components/ui/card";
 import { Progress } from "@/components/ui/progress";
 import { AlertTriangle, CheckCircle2, AlertCircle, TrendingUp, Loader2, FileText, ListChecks, ShieldCheck, Paperclip } from "lucide-react";
@@ -33,7 +34,7 @@ function triggeringAnswerLabel(gap: DerivedGap): string {
 
 export default function Dashboard() {
   const [, setLocation] = useLocation();
-  const { user, isAuthenticated, loading } = useAuth();
+  const { user, isAuthenticated, loading, refetchUser } = useAuth();
 
   const answersQuery = trpc.compliance.getAnswers.useQuery(undefined, {
     enabled: isAuthenticated,
@@ -124,9 +125,15 @@ export default function Dashboard() {
     );
   }
 
-  if (!user) {
+  // A missing session means signed out -> /login. A session that IS present but whose
+  // account failed to load is a DATA failure, not an auth failure: never redirect on it.
+  if (!isAuthenticated) {
     setLocation("/login");
     return null;
+  }
+
+  if (!user) {
+    return <SessionDataError onRetry={() => { void refetchUser(); }} />;
   }
 
   const getRiskColor = (score: number) => {

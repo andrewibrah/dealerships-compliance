@@ -8,7 +8,19 @@ import superjson from 'superjson';
 import App from './App';
 import './index.css';
 
-const queryClient = new QueryClient();
+// Compliance state only changes on a deliberate user action, and every mutation already
+// invalidates the queries it affects. React Query's defaults (staleTime 0 +
+// refetchOnWindowFocus) therefore replayed the whole 5-query dashboard batch on every
+// remount and every tab focus, which is pure load on the database layer for data we know
+// has not changed.
+const queryClient = new QueryClient({
+  defaultOptions: {
+    queries: {
+      staleTime: 30_000,
+      refetchOnWindowFocus: false,
+    },
+  },
+});
 
 const redirectToLoginIfUnauthorized = (error: unknown) => {
   if (!(error instanceof TRPCClientError)) return;

@@ -1,81 +1,104 @@
 # Next Work — handoff for the next session
 
-## Carryover from #4 (operational — do first; )
-Remediation #4 (object model) is **code-complete, committed, and pushed**: branch
-`feat/prd3-object-model` (`db546a9`), all 9 PRD #3 entities + the `evidence_controls` join, both
-runtimes, migrations `0005–0007`, 116 tests green. NOT merged to main; migrations NOT applied. Full
-detail: `.claude/tasks/done/0004-object-model.md`.
-1. **Apply `0005`/`0006`/`0007` to prod — NOT via `supabase db push`.** `supabase migration list`
-   shows the remote history is timestamped and diverged; the CLI sees numeric `0001–0007` as all
-   pending and would replay `0001–0004` (already live under timestamped names). Safe path: paste
-   `0005/0006/0007` into the Supabase SQL editor (all idempotent), then optionally
-   `supabase migration repair --status applied 0005 0006 0007`. (Reconciling the numeric↔timestamped
-   history — repair `0001–0004` or rename files to timestamps — is a separate cleanup.)
-2. **Create the private `evidence` Storage bucket** (same posture as `documents`) — needed before
-   `evidence.getUrl` works at runtime.
-3. **Merge `feat/prd3-object-model` → main** (opens the edge auto-deploy) once 1–2 are done, so the
-   new procedures have their tables. No client calls them yet (backend-only), so there's no rush/breakage.
-4. **`pnpm db:push`** locally to sync drizzle-kit generated state after applying.
-5. **Composite-FK hardening** (one small migration `0008`): add `(dealership_id, <ref>_id) →
-   <parent>(dealership_id, id)` on `risks.control_id`, `tasks.control_id`,
-   `evidence_controls.control_id` + `.evidence_id`, `data_flows.source/destination_asset_id`,
-   `attestations.policy_id`. (`requirement_id` → global catalog, exempt.) No live leak today; do it
-   before these links get client wiring.
-
----
-
 ## Task
-**Remediation #5 — Citation-level explainability, on top of the JSONB→Control cutover.** Every gap
-must trace to a specific **§314.4 citation + the triggering answer** (PRD #19 — "non-negotiable" per
-PRD — and #62 grounding). PRD #19/#62 — **High**. This rests on #4's `Requirement.citation` spine and
-naturally pairs with finishing the migration the object model only *began*.
+**Full audit + repair of the Supabase ↔ webapp communication layer.** Treat this as a DevOps/perf
+pass on the core feature: how the client talks to the API, how the API talks to Postgres, how many
+round-trips a page costs, and whether any of it survives real traffic. Two confirmed production
+bugs (below) are part of this task, not separate work.
 
-## Cold-start context
-- **The enabling half is the cutover.** #4 modeled the entities but the questionnaire still writes/reads
-  `compliance_answers.answers` JSONB; `shared/controls.ts` (`deriveControlsFromAnswers`) exists but is
-  **not wired** into the save path or scoring. Do the cutover first, then hang citations off it:
-  1. On `compliance.saveSection`/`saveAnswer`, ALSO upsert derived `Control` rows (status per
-     Requirement) via `upsertControl` — additively, behind the existing JSONB write.
-  2. Move gap derivation to read `Control` + its `Requirement` (which carries `citation`, `weight`,
-     `section`), keeping `shared/scoring.ts` deterministic and its tests green.
-- **Then explainability (#19):** every gap/finding surfaces `§314.4(x)` (from `Requirement.citation`)
-  + the triggering answer (the Control's status + the answer that set it). Surface in the Dashboard
-  gap list and the WISP/board PDFs (`shared/pdf-generator.ts`).
-- **Citations are coarse today** — `Requirement.citation` is section-level (see `shared/requirements.ts`
-  `CITATION_BY_SECTION`). #5 is the moment to refine to per-requirement subsections where they differ
-  (e.g. §314.4(c)(1) access controls vs (c)(5) MFA within "Access Controls"). Keep it grounded — cite
-  the Rule, never generate a citation via LLM (compliance non-negotiable).
+Approach it like a real infra engineer: measure first, then fix. Every fix needs a before/after
+number or a test, not a vibe.
 
-## Design sketch (decide + log the choice in the `done/` log)
-- **No new tables likely** — this is wiring + refinement over #4's schema. If per-requirement citations
-  need more structure, extend `Requirement` (a nullable `subsection`/richer `citation`) via a small
-  migration `0009` (confirm next free number; remember the numeric↔timestamped caveat above).
-- **Keep the old JSONB path green** until the Control-derived path is proven — this is a migration,
-  not a rewrite. Tests: `server/scoring.test.ts`, `server/controls.test.ts`.
-- **Deterministic** end-to-end: status + gap + citation are all data-derived. No LLM in the path.
+## Scope — what to audit
+1. **Connection lifecycle (highest priority — see Bug 2).** How Postgres clients are created,
+   pooled, reused, and released in BOTH runtimes (`server/db.ts`, `supabase/functions/_shared/db.ts`).
+   Look specifically at `getDb()` vs `scoped()`: how many `postgres()` clients does one tRPC call
+   construct, what is each client's default pool size, and which paths ever release.
+2. **Connection target.** Confirm the *Edge Function's* `SUPABASE_DB_URL` (not just the local `.env`)
+   uses the **transaction-mode pooler on port 6543**, not 5432. The edge secret and the local value
+   are NOT identical today — verify with `supabase secrets list --project-ref $SUPABASE_PROJECT_REF`
+   and compare digests. Transaction mode requires `prepare: false` (already set — keep it).
+3. **Request fan-out.** The dashboard fires ~5 tRPC calls per load (`auth.me`,
+   `compliance.getAnswers`, `dealership.getCurrent`, `tasks.list`, `posture.list`). Check whether
+   tRPC batching is actually enabled in `client/src/lib/trpc.ts` (httpBatchLink vs httpLink), and
+   whether these should collapse into one procedure or be cached/staleTime'd instead of refetched.
+4. **Per-call cost.** `resolveTenantScope` runs on nearly every procedure and re-queries the
+   dealership; `upsertDerivedControls` does one `listRequirements()` + up to N sequential
+   `upsertControl` round-trips per save; `recordPostureSnapshot` adds two more reads per save.
+   Measure and batch what can be batched.
+5. **Query efficiency.** Missing indexes, N+1 patterns (esp. evidence↔control link resolution and
+   the examiner package's gather step), and anything doing per-row queries in a loop.
+6. **Caching/staleness.** React Query defaults, `enabled` guards, and invalidation breadth — are we
+   refetching the whole tenant on every mutation?
+
+## Bug 2 — Postgres connection pool exhaustion ⚠️ SERIOUS
+Reproduced: 12 identical tRPC calls → `200 ×9`, then `500 ×3`.
+```
+PostgresError: remaining connection slots are reserved for roles with the SUPERUSER attribute
+```
+The Edge Function opens a new Postgres connection per invocation and never releases it. Works for
+one user clicking slowly; collapses under any real traffic — and fails harder because the dashboard
+fires a 5-query batch on every load.
+
+**Fix direction:** connect via the transaction-mode pooler (port **6543**, not 5432), and hoist the
+client to **module scope** so it is reused across invocations instead of constructed per request.
+Note the two code paths differ — one releases its client, one does not — so confirm which is
+actually leaking before patching, and fix both runtimes identically.
+
+**Related, decouple it:** after login, landing on `/dashboard` → stuck at "Loading your compliance
+data…" → thrown back to the logged-out landing page with the session cleared. A failed *data* load
+is being handled as an *auth* failure. A 500 on data must not sign the user out. Check
+`client/src/hooks/useAuth.ts` and the redirect guards in the page components.
+
+**Acceptance:** 50+ concurrent/sequential identical calls all return 200; connection count stays
+flat under load (`select count(*) from pg_stat_activity`); a forced 500 on a data query leaves the
+session intact.
+
+## Bug 3 — Deep links return HTTP 404
+`/dashboard`, `/login`, `/evidence`, `/signup` all return **404 status codes**. The `404.html`
+redirect shim boots the SPA so it *looks* fine in a browser, but crawlers, uptime monitors, and
+link previews see a 404. Standard GitHub Pages tradeoff — invisible in a browser, real for anything
+automated.
+
+**Fix direction:** either accept + document it, or move the frontend to a host that supports SPA
+rewrites (the repo already has Vercel config/skills available). Decide deliberately; if we keep
+GitHub Pages, at minimum make sure uptime monitoring targets a path that returns 200.
+
+**Acceptance:** `curl -o /dev/null -w '%{http_code}' <deploy-url>/dashboard` returns 200 (or a
+documented, deliberate decision to keep 404 with monitoring adjusted).
 
 ## Relevant files
-- `shared/controls.ts` (`deriveControlsFromAnswers` — wire this in), `server/db.ts` +
-  `supabase/functions/_shared/db.ts` (`upsertControl`, `listControls`), both router copies
-  (`compliance.saveSection`/`saveAnswer`).
-- `shared/scoring.ts` (deterministic gap derivation — the thing to migrate onto Controls) + its test.
-- `shared/requirements.ts` (`REQUIREMENT_CATALOG`, `CITATION_BY_SECTION` — refine per-requirement) +
-  `server/requirements-seed.test.ts` / `server/requirements.test.ts` (update if the catalog changes;
-  the seed drift-guard fails if `0005`'s seed and the catalog diverge).
-- `shared/pdf-generator.ts`, `client/src/pages/Dashboard.tsx` (surface the citation + triggering answer).
-- `.claude/tasks/done/0004-object-model.md` — the entities/accessors you build on.
+- `server/db.ts:29-59` (`getDb`, `scoped`) and `supabase/functions/_shared/db.ts:24-52` — the twins
+- `supabase/functions/trpc/index.ts` — Edge entrypoint / per-invocation lifecycle
+- `client/src/lib/trpc.ts` — link config, batching
+- `client/src/pages/Dashboard.tsx:38-49` — the 5-query fan-out
+- `client/src/hooks/useAuth.ts` — session teardown + the auth/data coupling
+- `server/routers.ts` / `supabase/functions/_shared/routers.ts` — `upsertDerivedControls`,
+  `recordPostureSnapshot`, `resolveTenantScope` call sites
+- `shared/tenant-guard.ts:51` — `resolveTenantScope` (runs on nearly every procedure)
+- `.github/workflows/deploy-frontend.yml`, `client/public/404.html`, `vite.config.ts` (base path)
 
 ## Watch out for
-- **Don't break scoring or the Wizard.** Keep JSONB authoritative until Control-derived scoring passes
-  the same tests. The Wizard writes JSONB; the cutover is additive first, swap second.
-- **Both runtimes / two copies** stay in sync (schema, both `db.ts`, both routers, audit actions).
-- **RLS**: any new/changed table keeps `enable`+`force` + a tenant (or read-all for global) policy in
-  the same migration — a FORCE-RLS table with no policy denies all authenticated access.
-- **No `deno` / no live DB locally** → verify Edge by mirroring + grep parity; verify migrations on a
-  branch/SQL-editor apply, not `db push` (see carryover #1).
-- **Citation accuracy is a compliance claim** — every §314.4 citation must be correct and grounded.
+- **Both runtimes stay in sync** — `server/*` ↔ `supabase/functions/_shared/*`. Current parity:
+  db.ts exports 48/48. No `deno` binary locally, so mirror exactly + grep parity.
+- **Module-scope hoisting must not break tenant isolation.** `scoped()` sets `set local role` +
+  JWT claims inside a transaction; a shared/pooled client must still deliver those per-transaction,
+  and `set local` must never leak across pooled sessions. This is the one place where a perf fix
+  could silently become a security bug — test A-cannot-read-B (`server/tenant-guard.test.ts`) after.
+- **Transaction-mode pooling does not support prepared statements or session-level state.** Keep
+  `prepare: false`; audit anything relying on session GUCs outside a transaction.
+- Don't regress: 283 tests, `pnpm check` / `test` / `lint` / `build` all currently green.
+- Migrations are applied directly by the agent now (see CLAUDE.md) — history is reconciled and
+  `0001`–`0012` are recorded; next free number is `0013`.
+
+## Carryover (small, unrelated)
+1. **Re-run the whole-branch integrity audit** — it never completed last session (reviewer hit its
+   usage limit); the orchestrator self-verified, which doesn't satisfy the no-self-approval rule.
+2. **Decide on GitNexus licensing** — `PolyForm-Noncommercial-1.0.0` on a commercial product.
+3. **Pin `zod` in the Deno runtime** — `npm:zod` unpinned vs Node's lockfile 3.25.76.
+4. **Fix edge-secret typos** — `STRIPE_SECERT_KEY`, `VITE_APP_URP`, `STRIPE_WEBHOOK_KEY`.
 
 ## After this
-**Remediation #6 — Written Risk Assessment generator** (PRD #20/#13) — now unblocked: the `Risk`,
-`Asset`, and `DataFlow` entities exist to drive it. Then #7 IRP generator (§314.4(h)), #8 task board
-on the `Task` entity.
+**Remediation #10 — Law-as-data** (PRD #6/#5): externalize §314.4 to versioned content with
+effective dates + applicability. Then #13 recurrence engine, #14 dealer groups. Phase 4 designs
+(RBAC, onboarding, recurrence, attestations) are in `.claude/tasks/done/0005-front-facing-phases-1-3.md`.

@@ -1,4 +1,5 @@
 import { Button } from "@/components/ui/button";
+import { SessionDataError } from "@/components/SessionDataError";
 import { Card } from "@/components/ui/card";
 import { AlertCircle, Download, FileText, Lock, ShieldCheck } from "lucide-react";
 import { useState } from "react";
@@ -25,7 +26,7 @@ const DOC_TYPE_LABELS: Record<string, string> = {
 export default function Documents() {
   const [, setLocation] = useLocation();
   const [policyType, setPolicyType] = useState<PolicyType>("access_control");
-  const { user, isAuthenticated, loading } = useAuth();
+  const { user, isAuthenticated, loading, refetchUser } = useAuth();
 
   const subscriptionQuery = trpc.stripe.getSubscriptionStatus.useQuery(undefined, {
     enabled: isAuthenticated,
@@ -96,9 +97,15 @@ export default function Documents() {
     );
   }
 
-  if (!user) {
+  // A missing session means signed out -> /login. A session that IS present but whose
+  // account failed to load is a DATA failure, not an auth failure: never redirect on it.
+  if (!isAuthenticated) {
     setLocation("/login");
     return null;
+  }
+
+  if (!user) {
+    return <SessionDataError onRetry={() => { void refetchUser(); }} />;
   }
 
   const handleGenerateWISP = () => {

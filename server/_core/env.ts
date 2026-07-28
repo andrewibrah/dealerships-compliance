@@ -5,7 +5,8 @@ export const ENV = {
   supabaseUrl: process.env.SUPABASE_URL ?? '',
   supabaseAnonKey: process.env.SUPABASE_ANON_KEY ?? '',
   supabaseServiceRoleKey: process.env.SUPABASE_SERVICE_ROLE_KEY ?? '',
-  supabaseDbUrl: process.env.SUPABASE_DB_URL ?? process.env.DATABASE_URL ?? '',
+  // APP_DB_URL first — see the note in server/db.ts and supabase/functions/_shared/env.ts.
+  supabaseDbUrl: process.env.APP_DB_URL ?? process.env.SUPABASE_DB_URL ?? process.env.DATABASE_URL ?? '',
   // Optional: enables the DISPLAY-ONLY phrasing/narrative layers (PRD #11/#39 + the architecture
   // narrative). OpenAI is preferred when set, else Anthropic; with neither, both surfaces pass
   // through to their deterministic text (plain forms / template narrative). Never used to decide

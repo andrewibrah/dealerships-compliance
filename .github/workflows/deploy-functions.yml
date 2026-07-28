@@ -33,4 +33,11 @@ jobs:
       # Edge function runtime secrets (STRIPE_*, ADMIN_EMAIL, etc.) are managed
       # directly on the Supabase project (dashboard or `supabase secrets set`).
       # SUPABASE_URL / SUPABASE_*_KEY / SUPABASE_DB_URL are injected automatically
-      # by the platform and cannot be set via `supabase secrets set`.
+      # by the platform and cannot be set via `supabase secrets set` (the CLI rejects
+      # the reserved prefix: "Env name cannot start with SUPABASE_").
+      #
+      # Because of that, the database URL the app actually uses is APP_DB_URL, set as a
+      # project secret. It must point at the Supavisor SESSION-mode pooler (port 5432 on
+      # the *.pooler.supabase.com host): the platform-injected SUPABASE_DB_URL is not the
+      # right target, and postgres.js deadlocks against transaction mode (6543) whenever a
+      # query has to wait for a pooled connection. See shared/db-options.ts.

@@ -1,4 +1,5 @@
 import { Button } from "@/components/ui/button";
+import { SessionDataError } from "@/components/SessionDataError";
 import { Card } from "@/components/ui/card";
 import {
   Archive,
@@ -53,7 +54,7 @@ function humanizeType(policyType: string): string {
 
 export default function Policies() {
   const [, setLocation] = useLocation();
-  const { user, isAuthenticated, loading } = useAuth();
+  const { user, isAuthenticated, loading, refetchUser } = useAuth();
   const utils = trpc.useUtils();
 
   const policiesQuery = trpc.policies.list.useQuery(undefined, { enabled: isAuthenticated });
@@ -77,9 +78,15 @@ export default function Policies() {
     );
   }
 
-  if (!user) {
+  // A missing session means signed out -> /login. A session that IS present but whose
+  // account failed to load is a DATA failure, not an auth failure: never redirect on it.
+  if (!isAuthenticated) {
     setLocation("/login");
     return null;
+  }
+
+  if (!user) {
+    return <SessionDataError onRetry={() => { void refetchUser(); }} />;
   }
 
   const policies = policiesQuery.data ?? [];

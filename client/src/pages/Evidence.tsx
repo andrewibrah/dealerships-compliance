@@ -1,4 +1,5 @@
 import { Button } from "@/components/ui/button";
+import { SessionDataError } from "@/components/SessionDataError";
 import { Card } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import {
@@ -137,7 +138,7 @@ function ChecklistRow({
 
 export default function Evidence() {
   const [, setLocation] = useLocation();
-  const { user, isAuthenticated, loading } = useAuth();
+  const { user, isAuthenticated, loading, refetchUser } = useAuth();
   const utils = trpc.useUtils();
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [title, setTitle] = useState("");
@@ -176,9 +177,15 @@ export default function Evidence() {
     );
   }
 
-  if (!user) {
+  // A missing session means signed out -> /login. A session that IS present but whose
+  // account failed to load is a DATA failure, not an auth failure: never redirect on it.
+  if (!isAuthenticated) {
     setLocation("/login");
     return null;
+  }
+
+  if (!user) {
+    return <SessionDataError onRetry={() => { void refetchUser(); }} />;
   }
 
   // Scope-aware (PRD #7): the checklist only asks for evidence on in-scope, open controls. Default

@@ -44,19 +44,20 @@ async function upsertDerivedControls(
 ): Promise<number> {
   const catalog = await db.listRequirements();
   const requirementIdByCode = new Map(catalog.map((r) => [r.code, r.id]));
-  let controlsUpserted = 0;
-  for (const [code, value] of Object.entries(answers)) {
+  // Build the whole set first, then write it in ONE statement. This used to issue one
+  // transaction per answered requirement — up to 45 sequential round-trips per save.
+  const derived = Object.entries(answers).flatMap(([code, value]) => {
     const requirementId = requirementIdByCode.get(code);
-    if (requirementId === undefined) continue;
-    await db.upsertControl(scope, {
+    if (requirementId === undefined) return [];
+    return [{
       requirementId,
       status: deriveControlStatus(value as AnswerValue),
       notes: '',
       source: 'questionnaire',
-    });
-    controlsUpserted += 1;
-  }
-  return controlsUpserted;
+    }];
+  });
+  await db.upsertControls(scope, derived);
+  return derived.length;
 }
 
 // Continuous posture tracking (PRD #33). After the answers write, recompute the dealer's overall
@@ -594,9 +595,12 @@ const tasksRouter = router({
       db.listTasks(scope),
     ]);
     const derived = deriveTasksFromControls({ controls, requirements, existingTasks });
-    const created = [];
-    for (const input of derived) {
-      const task = await db.createTask(scope, input);
+    // ONE insert for the whole derived set. The audit appends below stay sequential on
+    // purpose: audit_log is a SHA-256 prev_hash -> row_hash chain and must be ordered.
+    const created = await db.createTasks(scope, derived);
+    for (let i = 0; i < created.length; i++) {
+      const task = created[i];
+      const input = derived[i];
       await db.appendAuditLog({
         action: AUDIT_ACTIONS.taskCreate,
         actor: { userId: ctx.user.id, email: ctx.user.email },
@@ -605,7 +609,6 @@ const tasksRouter = router({
         dealershipId: scope.dealershipId,
         metadata: { title: task.title, priority: task.priority, source: 'derive', controlId: input.controlId },
       });
-      created.push(task);
     }
     return created;
   }),

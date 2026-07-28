@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { SessionDataError } from "@/components/SessionDataError";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
@@ -40,7 +41,7 @@ const emptyForm: ProfileForm = {
 
 export default function Profile() {
   const [, setLocation] = useLocation();
-  const { user, isAuthenticated, loading, logout } = useAuth();
+  const { user, isAuthenticated, loading, refetchUser, logout } = useAuth();
   const utils = trpc.useUtils();
   const dealershipQuery = trpc.dealership.getCurrent.useQuery(undefined, {
     enabled: isAuthenticated,
@@ -106,9 +107,15 @@ export default function Profile() {
     );
   }
 
-  if (!user) {
+  // A missing session means signed out -> /login. A session that IS present but whose
+  // account failed to load is a DATA failure, not an auth failure: never redirect on it.
+  if (!isAuthenticated) {
     setLocation("/login");
     return null;
+  }
+
+  if (!user) {
+    return <SessionDataError onRetry={() => { void refetchUser(); }} />;
   }
 
   const isSaving = createProfile.isPending || updateProfile.isPending;

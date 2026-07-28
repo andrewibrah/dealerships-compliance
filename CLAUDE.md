@@ -48,6 +48,19 @@ supabase/migrations/   SQL applied to Supabase Postgres
   `https://andrewibrah.github.io/dealerships-compliance`. `VITE_API_URL` points at the Edge Function base.
 - **API** → Supabase Edge Function `supabase/functions/trpc` serves all tRPC traffic in prod;
   the Express server in `server/` is local dev only.
+- **Database connections go through `APP_DB_URL`, not `SUPABASE_DB_URL`.** The Edge platform
+  injects its own reserved `SUPABASE_DB_URL` and the CLI refuses to override any `SUPABASE_`-prefixed
+  secret, so `APP_DB_URL` is the override both runtimes read first. It must point at the Supavisor
+  **transaction-mode** pooler (port **6543**). Connection options are centralized in
+  `shared/db-options.ts` — read the measurements in that file before changing `max`: too low
+  deadlocks postgres.js against the pooler, too high exhausts Supavisor's 200-client ceiling.
+- **Deep links return HTTP 404 — accepted, deliberate (2026-07-27).** GitHub Pages has no SPA
+  rewrite, so `/dashboard`, `/login`, `/evidence`, `/signup` all return a **404 status**; the
+  `client/public/404.html` shim boots the SPA so browsers behave correctly, but crawlers, uptime
+  monitors and link previews see the 404. Only `/` and `/index.html` return 200.
+  **Uptime monitoring must therefore probe `/` (frontend) and
+  `<VITE_API_URL>/trpc/system.health` (API) — never a deep link.** Revisit only if SEO or link
+  previews start mattering; the fix is moving the frontend to a host with SPA rewrites.
 - **The tRPC router exists in two copies that must stay in sync:** `server/routers.ts` (Node, the
   `AppRouter` type the client compiles against) and `supabase/functions/_shared/routers.ts` (Deno,
   what actually runs). Change a procedure in one → change it in the other. Runtime-neutral logic
@@ -78,7 +91,9 @@ serves short-lived signed URLs from the Supabase Storage `documents` bucket.
 **auth-only** (`client/src/lib/supabase.ts`); all business data flows through tRPC.
 
 **Env vars:** `SUPABASE_URL` / `SUPABASE_ANON_KEY` (auth), `SUPABASE_SERVICE_ROLE_KEY` (storage),
-`SUPABASE_DB_URL` (Drizzle), `ADMIN_EMAIL`, `STRIPE_SECRET_KEY` / `STRIPE_WEBHOOK_SECRET` /
+`APP_DB_URL` (the database URL both runtimes actually use — transaction-mode pooler, port 6543;
+set as an edge secret because `SUPABASE_`-prefixed names are reserved), `SUPABASE_DB_URL` (fallback,
+and what `psql`/Drizzle use locally), `ADMIN_EMAIL`, `STRIPE_SECRET_KEY` / `STRIPE_WEBHOOK_SECRET` /
 `STRIPE_CORE_PRICE_ID` / `STRIPE_MANAGED_PRICE_ID`, `OPENAI_API_KEY` (powers the two display-only
 LLM surfaces via `shared/llm-provider.ts`; `ANTHROPIC_API_KEY` is an optional alternative — with
 neither, both surfaces pass through to deterministic text), `RESEND_API_KEY`

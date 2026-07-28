@@ -13,6 +13,7 @@ import {
 import type { TenantScope } from '../../../shared/tenant-guard.ts';
 import type { ControlStatus } from '../../../shared/controls.ts';
 import { AUTHENTICATED_ROLE, JWT_CLAIMS_SETTING, buildJwtClaims, isRlsEnforced } from '../../../shared/rls.ts';
+import { POSTGRES_OPTIONS } from '../../../shared/db-options.ts';
 import { writeAuditSafely, type AuditEventInput } from '../../../shared/audit.ts';
 
 const SCHEMA = {
@@ -21,9 +22,25 @@ const SCHEMA = {
   postureSnapshots,
 };
 
+// ONE Postgres client per Edge isolate, created lazily on first use and reused across
+// every invocation the isolate serves. It is deliberately never ended: the client owns
+// a pool (POSTGRES_OPTIONS.max) shared by every query and every transaction.
+//
+// Previously `getDb()` constructed a fresh client per call and never released it, so a
+// single batched dashboard load leaked ~7 clients that outlived the invocation;
+// connections accumulated until the database refused new ones ("remaining connection
+// slots are reserved for roles with the SUPERUSER attribute"). Lazily-initialised
+// rather than module-scope so importing this module without a configured database URL
+// is not a side effect.
+let sharedClient: ReturnType<typeof postgres> | null = null;
+
+function client() {
+  sharedClient ??= postgres(ENV.supabaseDbUrl, POSTGRES_OPTIONS);
+  return sharedClient;
+}
+
 function getDb() {
-  const client = postgres(ENV.supabaseDbUrl, { prepare: false });
-  return drizzle(client, { schema: SCHEMA });
+  return drizzle(client(), { schema: SCHEMA });
 }
 
 function rlsEnforced() {
@@ -35,20 +52,21 @@ type ScopedTx = Parameters<Parameters<ReturnType<typeof getDb>['transaction']>[0
 // Mirror of server/db.ts `scoped`: tenant-scoped unit of work. When RLS_ENFORCED=true
 // and a userId is present, impersonate the `authenticated` role + inject JWT claims so
 // Postgres RLS (0003 migration) applies; otherwise a plain service-role transaction.
+//
+// Runs on the shared pooled client. Tenant isolation is preserved because the scoping
+// is transaction-local by construction: postgres.js reserves one dedicated connection
+// for the duration of a `transaction()`, and both `set_config(..., true)` and
+// `set local role` are reverted by Postgres at COMMIT/ROLLBACK. No scoping state can
+// therefore outlive the transaction or leak to the next borrower of that connection.
 async function scoped<T>(userId: string | null, fn: (tx: ScopedTx) => Promise<T>): Promise<T> {
-  const client = postgres(ENV.supabaseDbUrl, { prepare: false });
-  try {
-    const database = drizzle(client, { schema: SCHEMA });
-    return await database.transaction(async (tx) => {
-      if (userId && rlsEnforced()) {
-        await tx.execute(sql`select set_config(${JWT_CLAIMS_SETTING}, ${buildJwtClaims(userId)}, true)`);
-        await tx.execute(sql.raw(`set local role ${AUTHENTICATED_ROLE}`));
-      }
-      return fn(tx);
-    });
-  } finally {
-    await client.end({ timeout: 5 });
-  }
+  const database = drizzle(client(), { schema: SCHEMA });
+  return database.transaction(async (tx) => {
+    if (userId && rlsEnforced()) {
+      await tx.execute(sql`select set_config(${JWT_CLAIMS_SETTING}, ${buildJwtClaims(userId)}, true)`);
+      await tx.execute(sql.raw(`set local role ${AUTHENTICATED_ROLE}`));
+    }
+    return fn(tx);
+  });
 }
 
 // Users
@@ -218,6 +236,44 @@ export function upsertControl(
   });
 }
 
+/**
+ * Batched form of `upsertControl` (mirrors server/db.ts). One transaction and ONE
+ * statement for the whole set, instead of one `scoped()` transaction per control — a
+ * section save derives up to 45 controls, which previously cost 45 sequential round-trips.
+ *
+ * Same tenant guarantee as the singular version: every row's `dealershipId` comes from
+ * the resolved `scope`, never from the caller's input.
+ */
+export function upsertControls(
+  scope: TenantScope,
+  inputs: ReadonlyArray<{ requirementId: number; status: ControlStatus; notes: string; source: string }>,
+) {
+  if (inputs.length === 0) return Promise.resolve([] as Control[]);
+  return scoped(scope.userId, async (tx) =>
+    tx
+      .insert(controls)
+      .values(
+        inputs.map((input) => ({
+          dealershipId: scope.dealershipId,
+          requirementId: input.requirementId,
+          status: input.status,
+          notes: input.notes,
+          source: input.source,
+        })),
+      )
+      .onConflictDoUpdate({
+        target: [controls.dealershipId, controls.requirementId],
+        set: {
+          status: sql`excluded.status`,
+          notes: sql`excluded.notes`,
+          source: sql`excluded.source`,
+          updatedAt: new Date(),
+        },
+      })
+      .returning(),
+  );
+}
+
 // Risks — crown-jewel tenant data: TenantScope-only (mirrors server/db.ts). updateRisk
 // re-filters by dealership so a client-supplied id can never reach another tenant's row.
 export function listRisks(scope: TenantScope) {
@@ -323,6 +379,22 @@ export function createTask(
     const [row] = await tx.insert(tasks).values({ ...input, dealershipId: scope.dealershipId }).returning();
     return row;
   });
+}
+
+/**
+ * Batched form of `createTask` (mirrors server/db.ts). One transaction and ONE insert for the whole derived
+ * set, instead of a transaction per task. The per-task audit-log writes that follow are
+ * deliberately NOT batched: `audit_log` is a SHA-256 `prev_hash -> row_hash` chain, so
+ * entries must be appended one at a time, in order, to stay verifiable.
+ */
+export function createTasks(
+  scope: TenantScope,
+  inputs: ReadonlyArray<Omit<InsertTask, 'id' | 'dealershipId' | 'createdAt' | 'updatedAt'>>,
+) {
+  if (inputs.length === 0) return Promise.resolve([] as Task[]);
+  return scoped(scope.userId, async (tx) =>
+    tx.insert(tasks).values(inputs.map((input) => ({ ...input, dealershipId: scope.dealershipId }))).returning(),
+  );
 }
 
 export function updateTask(
