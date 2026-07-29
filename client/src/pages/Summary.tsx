@@ -9,6 +9,14 @@ import { deriveAssessmentFromAnswers, type DerivedGap } from "@shared/derivation
 import { REQUIREMENT_CATALOG, REQUIREMENT_GUIDANCE } from "@shared/requirements";
 import type { AnswerValue } from "@shared/controls";
 import { getApplicability, applicableRequirements } from "@shared/applicability";
+import {
+  EFFORT_LABEL,
+  HORIZON_LABEL,
+  getCoordination,
+  horizonFor,
+  participantsLine,
+} from "@shared/coordination";
+import { priorityForWeight } from "@shared/task-derivation";
 
 // Signature one-pager (PRD #30): "here's your risk -> why it matters -> here's the fix."
 // Fully deterministic — every line traces to shared/derivation.ts (the derived gap + its
@@ -212,6 +220,30 @@ export default function Summary() {
                           {guidance.fix}
                         </p>
                       )}
+                      {/* Who acts + what closes it. A one-pager that names an owner is something
+                          leadership can act on in the meeting it is read in; without it, the
+                          reader agrees the finding is real and nothing happens. */}
+                      {(() => {
+                        const coordination = getCoordination(gap.requirementCode);
+                        return (
+                          <>
+                            <p className="mt-2 text-sm text-slate-300">
+                              <span className="font-semibold text-slate-200">Accountable: </span>
+                              {participantsLine(coordination)}
+                            </p>
+                            <p className="text-sm text-slate-300">
+                              <span className="font-semibold text-slate-200">Proof of completion: </span>
+                              {coordination.proof}
+                            </p>
+                            <p className="text-xs text-slate-400 mt-1">
+                              {EFFORT_LABEL[coordination.effort]} ·{" "}
+                              {HORIZON_LABEL[
+                                horizonFor(priorityForWeight(gap.weight), coordination.effort)
+                              ].toLowerCase()}
+                            </p>
+                          </>
+                        );
+                      })()}
                     </div>
                   </div>
                 </Card>

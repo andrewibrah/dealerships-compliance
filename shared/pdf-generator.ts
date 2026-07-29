@@ -7,6 +7,14 @@ import {
   type DerivedSectionScore,
 } from "./derivation.ts";
 import { REQUIREMENT_CATALOG, REQUIREMENT_GUIDANCE } from "./requirements.ts";
+import {
+  EFFORT_LABEL,
+  HORIZON_LABEL,
+  getCoordination,
+  horizonFor,
+  participantsLine,
+} from "./coordination.ts";
+import { priorityForWeight } from "./task-derivation.ts";
 import type { AnswerValue } from "./controls.ts";
 import {
   getApplicability,
@@ -212,9 +220,20 @@ function triggeringAnswerLabel(gap: DerivedGap): string {
   return "Not answered yet";
 }
 
-/** Write one gap as an explainable block: citation + triggering answer + why + fix. */
+/**
+ * Write one gap as an explainable, ACTIONABLE block: citation + triggering answer + why + fix,
+ * then the coordination facts — who is accountable, who else must participate, how long it takes,
+ * and what artifact closes it.
+ *
+ * The coordination lines are what separate a report that gets executed from one that gets filed.
+ * A finding with a citation but no owner is the failure mode this product exists to fix, so it
+ * belongs in the generated artifact and not only in the web UI. Authored content from
+ * shared/coordination.ts — never generated, and it makes no claim about what the Rule requires
+ * (the §314.4 citation above is the only regulatory assertion in the block).
+ */
 function writeGapDetail(w: PdfWriter, gap: DerivedGap, critical: boolean) {
   const guidance = REQUIREMENT_GUIDANCE[gap.requirementCode];
+  const coordination = getCoordination(gap.requirementCode);
   w.text(`• ${gap.title}  [${gap.citation}]`, {
     indent: 12,
     color: critical ? RED : rgb(0.1, 0.1, 0.1),
@@ -224,8 +243,14 @@ function writeGapDetail(w: PdfWriter, gap: DerivedGap, critical: boolean) {
     w.text(`Why it matters: ${guidance.whyItMatters}`, { indent: 22, size: 9, color: SLATE });
   }
   if (guidance?.fix) {
-    w.text(`Fix: ${guidance.fix}`, { indent: 22, size: 9, color: SLATE, gapAfter: 6 });
+    w.text(`Fix: ${guidance.fix}`, { indent: 22, size: 9, color: SLATE });
   }
+  w.text(`Accountable: ${participantsLine(coordination)}`, { indent: 22, size: 9, color: SLATE });
+  w.text(`Proof of completion: ${coordination.proof}`, { indent: 22, size: 9, color: SLATE });
+  w.text(
+    `Effort: ${EFFORT_LABEL[coordination.effort]} · Target: ${HORIZON_LABEL[horizonFor(priorityForWeight(gap.weight), coordination.effort)].toLowerCase()}`,
+    { indent: 22, size: 9, color: SLATE, gapAfter: 6 },
+  );
 }
 
 interface RemediationItem {
