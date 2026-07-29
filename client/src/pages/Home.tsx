@@ -2,7 +2,7 @@ import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { useAuth } from "@/hooks/useAuth";
 import { useLocation } from "wouter";
-import { ShieldCheck, FileText, ClipboardCheck, AlertTriangle } from "lucide-react";
+import { ShieldCheck, FileText, ClipboardCheck, Users } from "lucide-react";
 
 export default function Home() {
   const [, setLocation] = useLocation();
@@ -41,18 +41,22 @@ export default function Home() {
         </div>
       </header>
 
-      {/* Hero */}
+      {/* Hero. Positioned on the buyer's actual problem — nobody can tell them where they stand —
+          rather than on penalties. Fear converts once; legibility is what earns the second
+          engagement, and dealership operators have heard the fear pitch from every vendor. */}
       <section className="container mx-auto px-4 py-24 text-center max-w-3xl">
-        <div className="inline-flex items-center gap-2 border border-orange-600 bg-orange-950/30 text-orange-300 text-sm px-4 py-1.5 rounded-full mb-6">
-          <AlertTriangle size={14} />
-          FTC Safeguards Rule enforcement applies to every auto dealership
+        <div className="inline-flex items-center gap-2 border border-slate-600 bg-slate-800/60 text-slate-300 text-sm px-4 py-1.5 rounded-full mb-6">
+          <ShieldCheck size={14} aria-hidden="true" />
+          Built only for franchised auto dealerships · 16 CFR Part 314
         </div>
         <h1 className="text-5xl font-bold text-white mb-6">
-          Know exactly where your dealership stands on FTC Safeguards
+          Stop guessing whether your dealership is actually covered
         </h1>
         <p className="text-xl text-slate-300 mb-10">
-          Complete a 9-section assessment built on 16 CFR Part 314, see your compliance gaps ranked by
-          enforcement risk, and generate the WISP and board report your examiners and auditors expect.
+          Most stores cannot answer three questions: which controls are really working, which gaps
+          are ours versus the DMS vendor's, and what has to happen in the next 30 days. Answer a
+          9-section assessment and get a plan with a named owner, the outside party who has to
+          participate, and the artifact that proves each item is closed.
         </p>
         <div className="flex justify-center gap-4">
           <Button size="lg" className="bg-amber-600 hover:bg-amber-500 text-slate-950" onClick={primaryCta}>
@@ -68,28 +72,30 @@ export default function Home() {
       <section className="container mx-auto px-4 pb-24">
         <div className="grid gap-8 md:grid-cols-3 max-w-5xl mx-auto">
           <Card className="bg-slate-800 border-slate-700 p-8">
-            <ClipboardCheck className="text-amber-500 mb-4" size={28} />
-            <h3 className="text-lg font-bold text-white mb-2">Assess all 9 Safeguards elements</h3>
+            <ClipboardCheck className="text-amber-500 mb-4" size={28} aria-hidden="true" />
+            <h3 className="text-lg font-bold text-white mb-2">Findings you can check, not take on faith</h3>
             <p className="text-slate-300 text-sm">
-              Answer plain-language questions covering the Qualified Individual, risk assessment, access
-              controls, encryption, vendors, incident response, training, and monitoring. Answers save as
-              you go.
+              Every gap cites the §314.4 subsection it comes from and the answer that triggered it.
+              Nothing is inferred by a model, and an unanswered question is reported as unknown —
+              never as a failure. The tool will tell you when a control is already adequate.
             </p>
           </Card>
           <Card className="bg-slate-800 border-slate-700 p-8">
-            <AlertTriangle className="text-amber-500 mb-4" size={28} />
-            <h3 className="text-lg font-bold text-white mb-2">See gaps ranked by enforcement risk</h3>
+            <Users className="text-amber-500 mb-4" size={28} aria-hidden="true" />
+            <h3 className="text-lg font-bold text-white mb-2">A plan with owners, not a 70-page report</h3>
             <p className="text-slate-300 text-sm">
-              Your dashboard scores every section, flags critical gaps, and tells you what to fix first —
-              weighted toward the areas the FTC actually enforces.
+              Each open item names the accountable role — you, the GM, your IT provider, HR — flags
+              when the DMS vendor has to be in the room, and states the artifact that proves it is
+              closed. Sequenced across 30, 60, and 90 days.
             </p>
           </Card>
           <Card className="bg-slate-800 border-slate-700 p-8">
-            <FileText className="text-amber-500 mb-4" size={28} />
-            <h3 className="text-lg font-bold text-white mb-2">Generate WISP & board reports</h3>
+            <FileText className="text-amber-500 mb-4" size={28} aria-hidden="true" />
+            <h3 className="text-lg font-bold text-white mb-2">Proof that the program moved</h3>
             <p className="text-slate-300 text-sm">
-              Turn your answers into a Written Information Security Program and a board-ready annual
-              compliance report, built from your actual assessment data.
+              Generate your WISP, written risk assessment, incident response plan, policies, and a
+              board report from your real answers — then reassess and show ownership, your insurer,
+              and an examiner what changed since last quarter.
             </p>
           </Card>
         </div>

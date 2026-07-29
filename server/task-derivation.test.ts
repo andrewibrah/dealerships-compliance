@@ -7,6 +7,7 @@ import {
   type DerivableRequirement,
 } from '@shared/task-derivation';
 import type { ControlStatus } from '@shared/controls';
+import { COORDINATION_BY_CODE, COORDINATION_FALLBACK, OWNER_LABEL } from '@shared/coordination';
 
 // Minimal catalog stand-ins — structural subsets of the real Requirement/Control rows.
 const REQUIREMENTS: DerivableRequirement[] = [
@@ -79,7 +80,7 @@ describe('deriveTasksFromControls', () => {
     expect(byControl.get(12)?.priority).toBe('medium');
   });
 
-  it('grounds title + description in the requirement + its §314.4 citation, status open, owner empty', () => {
+  it('grounds title + description in the requirement + its §314.4 citation, status open', () => {
     const tasks = deriveTasksFromControls({
       controls: [control(10, 1, 'not_implemented')],
       requirements: REQUIREMENTS,
@@ -89,9 +90,47 @@ describe('deriveTasksFromControls', () => {
     expect(task.title).toBe('Close gap: Access Controls — Enforce MFA');
     expect(task.description).toContain('16 CFR §314.4(c)(5)');
     expect(task.status).toBe('open');
-    expect(task.owner).toBe('');
     expect(task.dueDate).toBeNull();
     expect(task.requirementId).toBe(1);
+  });
+
+  it('assigns the accountable role as the default owner (never leaves a gap unowned)', () => {
+    const tasks = deriveTasksFromControls({
+      controls: [control(10, 1, 'not_implemented'), control(11, 2, 'partial')],
+      requirements: REQUIREMENTS,
+      existingTasks: [],
+    });
+    // q4_1 (MFA) routes to the IT provider; q6_2 (vendor assessment) to the QI.
+    expect(tasks[0].owner).toBe(OWNER_LABEL[COORDINATION_BY_CODE.q4_1.owner]);
+    expect(tasks[1].owner).toBe(OWNER_LABEL[COORDINATION_BY_CODE.q6_2.owner]);
+    expect(tasks.every((t) => t.owner.length > 0)).toBe(true);
+  });
+
+  it('carries the proof-of-completion and consequence-of-delay into the task description', () => {
+    const tasks = deriveTasksFromControls({
+      controls: [control(10, 1, 'not_implemented')],
+      requirements: REQUIREMENTS,
+      existingTasks: [],
+    });
+    const { description } = tasks[0];
+    expect(description).toContain('Proof of completion:');
+    expect(description).toContain(COORDINATION_BY_CODE.q4_1.proof);
+    expect(description).toContain('If this slips:');
+    expect(description).toContain(COORDINATION_BY_CODE.q4_1.consequence);
+  });
+
+  it('falls back honestly for a requirement code with no authored coordination', () => {
+    const unmapped: DerivableRequirement = {
+      id: 9, code: 'q99_9', section: 9, sectionName: 'Testing', title: 'Unmapped',
+      citation: '§314.4(d)', weight: 'standard',
+    };
+    const tasks = deriveTasksFromControls({
+      controls: [control(90, 9, 'not_implemented')],
+      requirements: [unmapped],
+      existingTasks: [],
+    });
+    expect(tasks[0].owner).toBe(OWNER_LABEL[COORDINATION_FALLBACK.owner]);
+    expect(tasks[0].description).toContain(COORDINATION_FALLBACK.proof);
   });
 
   it('is deterministic in catalog order regardless of control input order', () => {

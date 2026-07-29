@@ -2,7 +2,7 @@ import { Button } from "@/components/ui/button";
 import { SessionDataError } from "@/components/SessionDataError";
 import { Card } from "@/components/ui/card";
 import { Progress } from "@/components/ui/progress";
-import { AlertTriangle, CheckCircle2, AlertCircle, TrendingUp, Loader2, FileText, ListChecks, ShieldCheck, Paperclip } from "lucide-react";
+import { AlertTriangle, CheckCircle2, AlertCircle, TrendingUp, Loader2, FileText, ListChecks, ShieldCheck, Paperclip, Building2, Clock, UserCheck } from "lucide-react";
 import { useLocation } from "wouter";
 import { useAuth } from "@/hooks/useAuth";
 import { trpc } from "@/lib/trpc";
@@ -18,12 +18,20 @@ import {
   type DerivedSectionScore,
 } from "@shared/derivation";
 import { REQUIREMENT_CATALOG, REQUIREMENT_GUIDANCE } from "@shared/requirements";
-import type { AnswerValue } from "@shared/controls";
+import { deriveControlStatus, type AnswerValue } from "@shared/controls";
 import {
   getApplicability,
   applicableQuestions,
   applicableRequirements,
 } from "@shared/applicability";
+import {
+  EFFORT_LABEL,
+  VENDOR_LABEL,
+  getCoordination,
+  horizonFor,
+  participantsLine,
+} from "@shared/coordination";
+import { priorityForWeight } from "@shared/task-derivation";
 
 /** The dealer's saved answer for a gap, phrased for the reader (grounded in the derived status). */
 function triggeringAnswerLabel(gap: DerivedGap): string {
@@ -105,6 +113,41 @@ export default function Dashboard() {
     !dealership?.qualifiedIndividual ? "Qualified Individual" : null,
     !dealership?.qiEmail ? "QI email" : null,
   ].filter(Boolean);
+
+  // Calibrated posture, not fear framing: a credible assessment has to be able to say what is
+  // ALREADY adequate, not only what is broken. Counted from the same deterministic statuses the
+  // gap list uses, so the two can never disagree.
+  const inScopeRequirements = applicableRequirements(REQUIREMENT_CATALOG, applicability);
+  const statusCounts = inScopeRequirements.reduce(
+    (acc, requirement) => {
+      const status = deriveControlStatus(flatAnswers[requirement.code]);
+      acc[status] = (acc[status] ?? 0) + 1;
+      return acc;
+    },
+    {} as Record<string, number>
+  );
+  const confirmedCount = statusCounts.implemented ?? 0;
+  const unansweredCount = statusCounts.unknown ?? 0;
+  const answeredCount = inScopeRequirements.length - unansweredCount;
+
+  // The next 30 days: the gaps whose (priority, effort) puts them inside the first horizon.
+  // This is the coordination answer — who acts, with whom, and what proves it is done — rather
+  // than a longer list of findings.
+  const WEIGHT_ORDER: Record<string, number> = { critical: 0, important: 1, standard: 2 };
+  const next30All = assessment.gaps
+    .filter((gap) => gap.status !== "unknown")
+    .map((gap) => ({ gap, coordination: getCoordination(gap.requirementCode) }))
+    .filter(
+      ({ gap, coordination }) =>
+        horizonFor(priorityForWeight(gap.weight), coordination.effort) === 30
+    )
+    // Heaviest first, then a stable tie-break on catalog order via the code.
+    .sort(
+      (a, b) =>
+        (WEIGHT_ORDER[a.gap.weight] ?? 3) - (WEIGHT_ORDER[b.gap.weight] ?? 3) ||
+        a.gap.requirementCode.localeCompare(b.gap.requirementCode)
+    );
+  const next30 = next30All.slice(0, 5);
 
   // Owner priorities: worst sections first, critical gaps ahead of standard ones
   const prioritySections: DerivedSectionScore[] = [...assessment.sections]
@@ -219,15 +262,31 @@ export default function Dashboard() {
         </div>
       )}
 
-      {/* FTC Urgency Banner */}
-      <div className="border-b border-orange-600 bg-orange-950/30">
+      {/* Calibrated posture statement. Deliberately NOT a penalty warning: an assessment that
+          can only escalate is not credible to an owner, and it is the fastest way to be read as
+          another vendor selling fear. State what is confirmed, what is open, and what is
+          genuinely unknown — and let the numbers carry the urgency. */}
+      <div className="border-b border-slate-700 bg-slate-900/60">
         <div className="container mx-auto px-4 py-4 flex items-start gap-4">
-          <AlertTriangle className="text-orange-500 flex-shrink-0 mt-1" size={24} />
+          <ShieldCheck className="text-amber-500 flex-shrink-0 mt-1" size={24} aria-hidden="true" />
           <div>
-            <h3 className="font-semibold text-orange-300 mb-1">⚠️ FTC Safeguards Rule Compliance Required</h3>
-            <p className="text-sm text-orange-200">
-              All auto dealerships must comply with FTC Safeguards Rule (16 CFR Part 314). Non-compliance can result in
-              significant penalties. Ensure your dealership has a Written Information Security Program (WISP) in place.
+            <h3 className="font-semibold text-slate-100 mb-1">
+              Where you actually stand on 16 CFR Part 314
+            </h3>
+            <p className="text-sm text-slate-300">
+              <span className="font-semibold text-green-400">{confirmedCount} of {inScopeRequirements.length}</span>{" "}
+              in-scope controls are confirmed in place.{" "}
+              {unansweredCount > 0 ? (
+                <>
+                  <span className="font-semibold text-slate-100">{unansweredCount}</span> are still
+                  unanswered — those are reported as unknown, never as failures, until you answer
+                  them.
+                </>
+              ) : (
+                <>Every in-scope control has been answered, so nothing below is an assumption.</>
+              )}{" "}
+              Each open item below cites the subsection of the Rule it comes from and the answer
+              that triggered it.
             </p>
           </div>
         </div>
@@ -289,6 +348,109 @@ export default function Dashboard() {
           </div>
         </Card>
 
+        {/* The next 30 days — the coordination answer.
+            Compliance programs stall as a coordination failure, not a knowledge failure: the GM
+            says it belongs to IT, IT says the DMS vendor owns it, and the gap stays open. This
+            card names the accountable role, the outside party who must participate, and the
+            artifact that proves closure — for the small set of work that genuinely fits in 30
+            days. Sequencing is deterministic (shared/coordination.ts), never generated. */}
+        {answeredCount > 0 && (
+          <Card className="bg-slate-800 border-slate-700 p-8 mb-12">
+            <div className="flex items-center gap-3 mb-2">
+              <ListChecks className="text-amber-500" size={24} aria-hidden="true" />
+              <h2 className="text-2xl font-bold text-white">What to do in the next 30 days</h2>
+            </div>
+            <p className="text-sm text-slate-400 mb-6">
+              Sequenced by urgency and by how much work each item actually takes — not the full gap
+              list.{" "}
+              {next30All.length > next30.length &&
+                `Showing the top ${next30.length} of ${next30All.length} that fit this month. `}
+              Everything else is scheduled into days 31–90 on your remediation plan.
+            </p>
+
+            {next30.length === 0 ? (
+              <div className="flex items-start gap-3 text-slate-300">
+                <CheckCircle2 className="text-green-500 flex-shrink-0 mt-0.5" size={20} aria-hidden="true" />
+                <p className="text-sm">
+                  Nothing open is both urgent and short enough to land inside 30 days. That is a
+                  legitimate result — the remaining work is longer-running, and it is sequenced
+                  into days 31–90 on your remediation plan.
+                </p>
+              </div>
+            ) : (
+              <ol className="space-y-4">
+                {next30.map(({ gap, coordination }, index) => (
+                  <li
+                    key={gap.requirementCode}
+                    className="rounded-lg border border-slate-700 bg-slate-900/40 p-4"
+                  >
+                    <div className="flex items-start gap-3">
+                      <span className="flex h-6 w-6 flex-shrink-0 items-center justify-center rounded-full bg-amber-600 text-xs font-bold text-slate-950">
+                        {index + 1}
+                      </span>
+                      <div className="min-w-0 flex-1">
+                        <div className="flex flex-wrap items-center gap-2 mb-2">
+                          <span className="font-medium text-slate-100">{gap.title}</span>
+                          <span className="rounded bg-slate-700 px-2 py-0.5 text-xs font-mono text-slate-200">
+                            {gap.citation}
+                          </span>
+                        </div>
+
+                        <dl className="space-y-1.5 text-sm">
+                          <div className="flex flex-wrap gap-x-2">
+                            <dt className="font-semibold text-slate-200">Who acts:</dt>
+                            <dd className="text-slate-300">{participantsLine(coordination)}</dd>
+                          </div>
+                          <div className="flex flex-wrap gap-x-2">
+                            <dt className="font-semibold text-slate-200">Proof it is done:</dt>
+                            <dd className="text-slate-300">{coordination.proof}</dd>
+                          </div>
+                          <div className="flex flex-wrap gap-x-2">
+                            <dt className="font-semibold text-slate-200">If this slips:</dt>
+                            <dd className="text-slate-300">{coordination.consequence}</dd>
+                          </div>
+                        </dl>
+
+                        <div className="mt-3 flex flex-wrap gap-2 text-xs">
+                          <span className="inline-flex items-center gap-1 rounded border border-slate-600 bg-slate-900/60 px-2 py-0.5 text-slate-300">
+                            <Clock size={12} aria-hidden="true" />
+                            {EFFORT_LABEL[coordination.effort]}
+                          </span>
+                          {coordination.vendor ? (
+                            <span className="inline-flex items-center gap-1 rounded border border-sky-800 bg-sky-950/50 px-2 py-0.5 text-sky-300">
+                              <Building2 size={12} aria-hidden="true" />
+                              Needs {VENDOR_LABEL[coordination.vendor]}
+                            </span>
+                          ) : (
+                            <span className="inline-flex items-center gap-1 rounded border border-slate-600 bg-slate-900/60 px-2 py-0.5 text-slate-400">
+                              <UserCheck size={12} aria-hidden="true" />
+                              Internal only
+                            </span>
+                          )}
+                        </div>
+                      </div>
+                    </div>
+                  </li>
+                ))}
+              </ol>
+            )}
+
+            <div className="mt-6 flex flex-wrap gap-3">
+              <Button
+                onClick={() => setLocation("/tasks")}
+                className="bg-amber-600 hover:bg-amber-500 text-slate-950"
+              >
+                <ListChecks size={16} className="mr-2" aria-hidden="true" />
+                Open the full 90-day plan
+              </Button>
+              <Button variant="outline" onClick={() => setLocation("/evidence")}>
+                <Paperclip size={16} className="mr-2" aria-hidden="true" />
+                Upload proof
+              </Button>
+            </div>
+          </Card>
+        )}
+
         {/* Compliance Posture Trend (PRD #33) — overall score over time from posture_snapshots. */}
         <Card className="bg-slate-800 border-slate-700 p-8 mb-12">
           <div className="flex items-center gap-3 mb-6">
@@ -317,8 +479,33 @@ export default function Dashboard() {
             const first = history[0];
             const last = history[history.length - 1];
             const label = `Compliance posture trend across ${history.length} snapshots, from ${first.score}% on ${first.at} to ${last.score}% on ${last.at}.`;
+            // The delta is the product's proof that the program actually moved — the thing a QI
+            // puts in front of ownership, and the reason a reassessment is worth running.
+            const delta = last.score - first.score;
             return (
               <div>
+                <p className="mb-4 text-sm text-slate-300">
+                  {delta > 0 && (
+                    <>
+                      <span className="font-semibold text-green-400">+{delta} points</span> since
+                      your first assessment on {first.at}. That movement is the evidence of a
+                      working program, not the score itself.
+                    </>
+                  )}
+                  {delta === 0 && (
+                    <>
+                      Your posture is unchanged since {first.at}. Closing items on the plan is what
+                      moves this line.
+                    </>
+                  )}
+                  {delta < 0 && (
+                    <>
+                      <span className="font-semibold text-orange-400">{delta} points</span> since{" "}
+                      {first.at} — usually a newly answered section revealing a gap that was
+                      previously unknown rather than a control that regressed.
+                    </>
+                  )}
+                </p>
                 <svg
                   viewBox={`0 0 ${w} ${h}`}
                   className="w-full h-32"
@@ -472,8 +659,10 @@ export default function Dashboard() {
 
           <div className="mt-6 p-4 bg-slate-700/50 rounded-lg">
             <p className="text-sm text-slate-300">
-              Start with the critical gaps above — these are the items FTC examiners look for first. Answer the
-              remaining wizard questions to get a complete picture, then generate your WISP and board report.
+              This is the complete finding list, ordered by weight. You do not need to work it in
+              this order — the 30-day block above is what actually fits in the next month, and the
+              rest is sequenced on your remediation plan. Answer any remaining questions to remove
+              the unknowns, then generate your WISP and board report.
             </p>
           </div>
         </Card>

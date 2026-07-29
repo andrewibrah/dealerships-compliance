@@ -38,7 +38,8 @@ export default function Pricing() {
         <div className="container mx-auto px-4 py-12">
           <h1 className="text-4xl font-bold text-white mb-4">Simple, Transparent Pricing</h1>
           <p className="text-xl text-slate-300">
-            Choose the plan that fits your dealership's compliance needs
+            Seeing where you stand is free. You pay when you need the documents that prove it —
+            and the quarterly cycle that keeps them true.
           </p>
         </div>
       </div>
@@ -49,7 +50,7 @@ export default function Pricing() {
           {/* Free Plan */}
           <Card className="bg-slate-800 border-slate-700 p-8 flex flex-col">
             <h3 className="text-2xl font-bold text-white mb-2">Free</h3>
-            <p className="text-slate-400 mb-6">Get started with compliance assessment</p>
+            <p className="text-slate-400 mb-6">Find out where you actually stand</p>
 
             <div className="mb-8">
               <div className="text-4xl font-bold text-white mb-2">$0</div>
@@ -57,25 +58,29 @@ export default function Pricing() {
             </div>
 
             <ul className="space-y-4 mb-8 flex-1">
-              <li className="flex items-center gap-3">
-                <CheckCircle2 className="text-green-500" size={20} />
-                <span className="text-slate-300">9-section compliance wizard</span>
+              <li className="flex items-start gap-3">
+                <CheckCircle2 className="text-green-500 flex-shrink-0 mt-0.5" size={20} aria-hidden="true" />
+                <span className="text-slate-300">9-section assessment across all Safeguards elements</span>
               </li>
-              <li className="flex items-center gap-3">
-                <CheckCircle2 className="text-green-500" size={20} />
-                <span className="text-slate-300">Real-time scoring</span>
+              <li className="flex items-start gap-3">
+                <CheckCircle2 className="text-green-500 flex-shrink-0 mt-0.5" size={20} aria-hidden="true" />
+                <span className="text-slate-300">
+                  Every gap cited to its §314.4 subsection and the answer that triggered it
+                </span>
               </li>
-              <li className="flex items-center gap-3">
-                <CheckCircle2 className="text-green-500" size={20} />
-                <span className="text-slate-300">Gap analysis</span>
+              <li className="flex items-start gap-3">
+                <CheckCircle2 className="text-green-500 flex-shrink-0 mt-0.5" size={20} aria-hidden="true" />
+                <span className="text-slate-300">
+                  A 30/60/90-day remediation plan with owners and required outside parties
+                </span>
               </li>
-              <li className="flex items-center gap-3">
-                <AlertCircle className="text-slate-500" size={20} />
-                <span className="text-slate-400">No PDF documents</span>
+              <li className="flex items-start gap-3">
+                <CheckCircle2 className="text-green-500 flex-shrink-0 mt-0.5" size={20} aria-hidden="true" />
+                <span className="text-slate-300">Evidence repository and posture history</span>
               </li>
-              <li className="flex items-center gap-3">
-                <AlertCircle className="text-slate-500" size={20} />
-                <span className="text-slate-400">No email reminders</span>
+              <li className="flex items-start gap-3">
+                <AlertCircle className="text-slate-500 flex-shrink-0 mt-0.5" size={20} aria-hidden="true" />
+                <span className="text-slate-400">No generated documents</span>
               </li>
             </ul>
 
@@ -93,7 +98,7 @@ export default function Pricing() {
             </div>
 
             <h3 className="text-2xl font-bold text-white mb-2">Core</h3>
-            <p className="text-slate-300 mb-6">Full compliance toolkit for dealerships</p>
+            <p className="text-slate-300 mb-6">Produce the written program and keep it current</p>
 
             <div className="mb-8">
               <div className="text-4xl font-bold text-amber-500 mb-2">$199</div>
@@ -101,29 +106,43 @@ export default function Pricing() {
             </div>
 
             <ul className="space-y-4 mb-8 flex-1">
-              <li className="flex items-center gap-3">
-                <CheckCircle2 className="text-green-500" size={20} />
+              <li className="flex items-start gap-3">
+                <CheckCircle2 className="text-green-500 flex-shrink-0 mt-0.5" size={20} aria-hidden="true" />
                 <span className="text-slate-300">Everything in Free</span>
               </li>
-              <li className="flex items-center gap-3">
-                <CheckCircle2 className="text-green-500" size={20} />
-                <span className="text-slate-300">WISP PDF generation</span>
+              <li className="flex items-start gap-3">
+                <CheckCircle2 className="text-green-500 flex-shrink-0 mt-0.5" size={20} aria-hidden="true" />
+                <span className="text-slate-300">Written Information Security Program (WISP)</span>
               </li>
-              <li className="flex items-center gap-3">
-                <CheckCircle2 className="text-green-500" size={20} />
-                <span className="text-slate-300">Board-level compliance report</span>
+              <li className="flex items-start gap-3">
+                <CheckCircle2 className="text-green-500 flex-shrink-0 mt-0.5" size={20} aria-hidden="true" />
+                <span className="text-slate-300">
+                  Written risk assessment and incident response plan
+                </span>
               </li>
-              <li className="flex items-center gap-3">
-                <CheckCircle2 className="text-green-500" size={20} />
-                <span className="text-slate-300">Document vault</span>
+              <li className="flex items-start gap-3">
+                <CheckCircle2 className="text-green-500 flex-shrink-0 mt-0.5" size={20} aria-hidden="true" />
+                <span className="text-slate-300">
+                  Board report for the QI's annual report to ownership
+                </span>
               </li>
-              <li className="flex items-center gap-3">
-                <CheckCircle2 className="text-green-500" size={20} />
-                <span className="text-slate-300">Email reminders</span>
+              <li className="flex items-start gap-3">
+                <CheckCircle2 className="text-green-500 flex-shrink-0 mt-0.5" size={20} aria-hidden="true" />
+                <span className="text-slate-300">
+                  Generated policies and a security architecture assessment
+                </span>
               </li>
-              <li className="flex items-center gap-3">
-                <CheckCircle2 className="text-green-500" size={20} />
-                <span className="text-slate-300">Priority support</span>
+              <li className="flex items-start gap-3">
+                <CheckCircle2 className="text-green-500 flex-shrink-0 mt-0.5" size={20} aria-hidden="true" />
+                <span className="text-slate-300">
+                  Examiner package: posture, document manifest, evidence index, audit trail
+                </span>
+              </li>
+              <li className="flex items-start gap-3">
+                <CheckCircle2 className="text-green-500 flex-shrink-0 mt-0.5" size={20} aria-hidden="true" />
+                <span className="text-slate-300">
+                  Reassess each quarter and regenerate — the documents track what changed
+                </span>
               </li>
             </ul>
 

@@ -10,9 +10,11 @@
 
 import type { ControlStatus } from './controls.ts';
 import { REQUIREMENT_GUIDANCE } from './requirements.ts';
+import { OWNER_LABEL, getCoordination, type TaskPriority } from './coordination.ts';
 
-/** Task priority enum, matching drizzle/schema.ts taskPriorityEnum. */
-export type TaskPriority = 'low' | 'medium' | 'high' | 'critical';
+/** Task priority enum, matching drizzle/schema.ts taskPriorityEnum. Defined in
+ *  shared/coordination.ts (which sequences on it) and re-exported here, where callers expect it. */
+export type { TaskPriority } from './coordination.ts';
 
 /** The Control fields task derivation needs (a structural subset of the DB Control row). */
 export interface DerivableControl {
@@ -105,16 +107,23 @@ export function deriveTasksFromControls(input: {
     if (trackedControlIds.has(control.id)) continue;
 
     const fix = REQUIREMENT_GUIDANCE[requirement.code]?.fix ?? '';
-    const description = fix
-      ? `${fix} (16 CFR ${requirement.citation})`
-      : `Remediate this gap to satisfy 16 CFR ${requirement.citation}.`;
+    const coordination = getCoordination(requirement.code);
+    const description = [
+      fix
+        ? `${fix} (16 CFR ${requirement.citation})`
+        : `Remediate this gap to satisfy 16 CFR ${requirement.citation}.`,
+      `Proof of completion: ${coordination.proof}`,
+      `If this slips: ${coordination.consequence}`,
+    ].join('\n\n');
 
     derived.push({
       title: `Close gap: ${requirement.sectionName} — ${requirement.title}`,
       description,
       status: 'open',
       priority: priorityForWeight(requirement.weight),
-      owner: '',
+      // A suggested accountable role, not a person: an unowned task is the single most common
+      // reason a known gap never closes. The user overwrites it with a name on the board.
+      owner: OWNER_LABEL[coordination.owner],
       dueDate: null,
       requirementId: requirement.id,
       controlId: control.id,
