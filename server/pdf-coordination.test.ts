@@ -44,6 +44,26 @@ function allNo(): ComplianceAnswerRow[] {
 }
 
 /**
+ * WinAnsi (CP1252) high-range characters, 0x80-0x9F — the ONLY bytes where WinAnsi and latin1
+ * disagree. pdf-lib's StandardFonts encode as WinAnsi, so an en dash is 0x96, which latin1 reads
+ * as an invisible control character: decoding wrong silently turns "1-2 weeks" into "12 weeks".
+ *
+ * Spelled out rather than using `new TextDecoder('windows-1252')` on purpose. That decoder needs
+ * a full-ICU Node build, which is an environment assumption a test should not carry — it passed
+ * locally and failed on CI, which is exactly the failure mode worth designing out. This table is
+ * hermetic and behaves identically everywhere.
+ */
+const WINANSI_C1 = '€‚ƒ„…†‡ˆ‰Š‹ŒŽ‘’“”•–—˜™š›œžŸ';
+
+function decodeWinAnsi(bytes: Buffer): string {
+  let out = '';
+  for (const byte of bytes) {
+    out += byte >= 0x80 && byte <= 0x9f ? WINANSI_C1[byte - 0x80] : String.fromCharCode(byte);
+  }
+  return out;
+}
+
+/**
  * Extract rendered text from a pdf-lib PDF: inflate every FlateDecode stream, then decode the
  * text-showing operands. pdf-lib emits HEX strings (`<48656C6C6F> Tj`) rather than `(literal) Tj`,
  * so both forms are handled. Good enough to assert on content; not a general PDF parser.
@@ -75,16 +95,11 @@ function pdfText(bytes: Uint8Array): string {
   const content = chunks.join('\n');
   const pieces: string[] = [];
 
-  // pdf-lib's StandardFonts encode text as WinAnsi (windows-1252), NOT latin1. The two differ in
-  // 0x80-0x9F: an en dash is 0x96 in WinAnsi but an invisible control char in latin1, so decoding
-  // as latin1 silently turns "1-2 weeks" into "12 weeks". Decode with the right codec.
-  const winAnsi = new TextDecoder('windows-1252');
-
   // Hex strings: <48656C6C6F>
   for (const match of content.matchAll(/<([0-9A-Fa-f\s]+)>/g)) {
     const hex = match[1].replace(/\s+/g, '');
     if (hex.length < 2 || hex.length % 2 !== 0) continue;
-    pieces.push(winAnsi.decode(Buffer.from(hex, 'hex')));
+    pieces.push(decodeWinAnsi(Buffer.from(hex, 'hex')));
   }
   // Literal strings: (Hello)
   for (const match of content.matchAll(/\((?:\\.|[^\\()])*\)/g)) {
@@ -95,6 +110,15 @@ function pdfText(bytes: Uint8Array): string {
 }
 
 describe('pdfText extractor (guards the assertions below)', () => {
+  it('has one WinAnsi C1 entry per byte 0x80-0x9F, including the undefined slots', () => {
+    // If a placeholder for an undefined CP1252 slot (0x81, 0x8D, 0x8F, 0x90, 0x9D) were dropped,
+    // every mapping after it would shift by one and decode the wrong character.
+    expect(WINANSI_C1).toHaveLength(32);
+    expect(decodeWinAnsi(Buffer.from([0x96]))).toBe('–'); // en dash
+    expect(decodeWinAnsi(Buffer.from([0xb7]))).toBe('·'); // middle dot (latin1 range)
+    expect(decodeWinAnsi(Buffer.from([0x41]))).toBe('A');
+  });
+
   it('recovers text that a raw byte grep cannot find', async () => {
     const bytes = await generateBoardReport(dealership, allNo());
     expect(Buffer.from(bytes).toString('latin1')).not.toContain('Accountable');
