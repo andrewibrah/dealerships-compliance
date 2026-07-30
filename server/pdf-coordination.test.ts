@@ -19,7 +19,7 @@ import {
   type DealershipInfo,
 } from '../shared/pdf-generator';
 import { SAFEGUARDS_SECTIONS } from '../shared/safeguards-questions';
-import { COORDINATION_BY_CODE, OWNER_LABEL, VENDOR_LABEL } from '@shared/coordination';
+import { COORDINATION_BY_CODE, OWNER_LABEL } from '@shared/coordination';
 
 const dealership: DealershipInfo = {
   name: 'Test Motors',
@@ -126,11 +126,6 @@ describe('generated artifacts carry the coordination facts', () => {
     expect(text).toContain('Accountable:');
     expect(text).toContain('Proof of completion:');
     expect(text).toContain('Effort:');
-  });
-
-  it('routes DMS-dependent gaps to the DMS vendor in the artifact itself', async () => {
-    const text = pdfText(await generateBoardReport(dealership, allNo()));
-    expect(text).toContain(VENDOR_LABEL.dms);
   });
 
   it('names real internal roles, not a placeholder', async () => {

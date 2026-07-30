@@ -9,7 +9,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { ArrowLeft, Building2, Clock, ListChecks, Loader2, Sparkles, UserCheck } from "lucide-react";
+import { ArrowLeft, Clock, ListChecks, Loader2, Sparkles, UserCheck } from "lucide-react";
 import { useLocation } from "wouter";
 import { toast } from "sonner";
 import { useAuth } from "@/hooks/useAuth";
@@ -17,7 +17,7 @@ import { trpc } from "@/lib/trpc";
 import {
   EFFORT_LABEL,
   HORIZON_LABEL,
-  VENDOR_LABEL,
+  OWNER_LABEL,
   getCoordination,
   horizonFor,
   type Coordination,
@@ -31,8 +31,8 @@ import type { AppRouter } from "../../../server/routers";
 // idempotent tasks.deriveFromControls on the server. No LLM, no client-side derivation.
 //
 // The board is sequenced, not just listed: open work is grouped into 30/60/90-day horizons by
-// shared/coordination.ts, and each row shows which outside party has to participate. A gap list
-// that does not say who acts, with whom, and by when is the thing dealerships never execute.
+// shared/coordination.ts, and each row names the accountable role. A gap list that does not say
+// who acts and by when is the thing dealerships never execute.
 
 type TaskRow = inferRouterOutputs<AppRouter>["tasks"]["list"][number];
 type TaskStatus = TaskRow["status"];
@@ -63,7 +63,7 @@ function toDateInputValue(due: Date | string | null): string {
 }
 
 /** A task plus the coordination facts for its requirement (null when the task is free-form or
- *  its requirement is not in the catalog — never fabricate an owner or a vendor). */
+ *  its requirement is not in the catalog — never fabricate an owner). */
 type PlannedTask = TaskRow & { coordination: Coordination | null };
 
 export default function Tasks() {
@@ -73,7 +73,7 @@ export default function Tasks() {
 
   const tasksQuery = trpc.tasks.list.useQuery(undefined, { enabled: isAuthenticated });
   // The GLOBAL catalog — used only to resolve requirementId -> code so each task can show who
-  // owns it and who else must participate. Read-only, never a source of status.
+  // owns it. Read-only, never a source of status.
   const requirementsQuery = trpc.requirements.list.useQuery(undefined, {
     enabled: isAuthenticated,
   });
@@ -150,7 +150,7 @@ export default function Tasks() {
             <h1 className="text-3xl font-bold text-white">Remediation Plan</h1>
             <p className="text-slate-400">
               {next30Count} in the next 30 days · {openCount} open · {tasks.length} total — who
-              does what, with whom, and by when
+              does what, and by when
             </p>
           </div>
           <div className="flex flex-wrap gap-3">
@@ -268,17 +268,10 @@ export default function Tasks() {
                           <Clock size={12} aria-hidden="true" />
                           {EFFORT_LABEL[task.coordination.effort]}
                         </span>
-                        {task.coordination.vendor ? (
-                          <span className="inline-flex items-center gap-1 rounded border border-sky-800 bg-sky-950/50 px-2 py-0.5 text-sky-300">
-                            <Building2 size={12} aria-hidden="true" />
-                            Needs {VENDOR_LABEL[task.coordination.vendor]}
-                          </span>
-                        ) : (
-                          <span className="inline-flex items-center gap-1 rounded border border-slate-600 bg-slate-900/60 px-2 py-0.5 text-slate-400">
-                            <UserCheck size={12} aria-hidden="true" />
-                            Internal only
-                          </span>
-                        )}
+                        <span className="inline-flex items-center gap-1 rounded border border-slate-600 bg-slate-900/60 px-2 py-0.5 text-slate-300">
+                          <UserCheck size={12} aria-hidden="true" />
+                          {OWNER_LABEL[task.coordination.owner]}
+                        </span>
                       </div>
                     )}
                     {task.description && (

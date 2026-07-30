@@ -5,13 +5,10 @@ import {
   EFFORT_LABEL,
   HORIZON_LABEL,
   OWNER_LABEL,
-  VENDOR_LABEL,
   getCoordination,
   horizonFor,
-  participantsLine,
   type Effort,
   type OwnerRole,
-  type VendorParty,
 } from '@shared/coordination';
 import { REQUIREMENT_CATALOG } from '@shared/requirements';
 import { priorityForWeight, type TaskPriority } from '@shared/task-derivation';
@@ -23,7 +20,6 @@ const OWNERS: OwnerRole[] = [
   'it_msp',
   'hr_training',
 ];
-const VENDORS: VendorParty[] = ['dms', 'msp', 'security_firm', 'counsel', null];
 const EFFORTS: Effort[] = ['quick', 'moderate', 'project'];
 const PRIORITIES: TaskPriority[] = ['critical', 'high', 'medium', 'low'];
 
@@ -49,7 +45,6 @@ describe('COORDINATION_BY_CODE coverage', () => {
 describe('COORDINATION_BY_CODE content', () => {
   it.each(Object.entries(COORDINATION_BY_CODE))('%s is well-formed', (code, coordination) => {
     expect(OWNERS, `${code} owner`).toContain(coordination.owner);
-    expect(VENDORS, `${code} vendor`).toContain(coordination.vendor);
     expect(EFFORTS, `${code} effort`).toContain(coordination.effort);
     // Proof and consequence are the credibility of the plan — never blank, never a stub.
     expect(coordination.proof.trim().length, `${code} proof`).toBeGreaterThan(20);
@@ -62,13 +57,21 @@ describe('COORDINATION_BY_CODE content', () => {
     }
   });
 
-  it('routes DMS-dependent controls to the DMS vendor', () => {
-    // The system of record must be in the room for access, encryption-at-rest, inventory,
-    // and its own vendor assessment.
-    expect(COORDINATION_BY_CODE.q3_1.vendor).toBe('dms');
-    expect(COORDINATION_BY_CODE.q4_1.vendor).toBe('dms');
-    expect(COORDINATION_BY_CODE.q5_1.vendor).toBe('dms');
-    expect(COORDINATION_BY_CODE.q6_4.vendor).toBe('dms');
+  it('carries no outside-party dependency (every item is internally owned)', () => {
+    // A named external dependency reads as a ready-made reason to defer, and the dealership owns
+    // the obligation under the Rule regardless of who it delegates the work to. Deliberate.
+    for (const [code, coordination] of Object.entries(COORDINATION_BY_CODE)) {
+      expect(coordination, code).not.toHaveProperty('vendor');
+    }
+  });
+
+  it('frames every consequence as regulatory exposure, not inconvenience', () => {
+    // Confirmed with the operator (2026-07-29): enforcement is what moves a dealer principal.
+    // Scoped to these lines only — the UI banners stay calibrated.
+    const grounded = Object.entries(COORDINATION_BY_CODE).filter(([, c]) =>
+      /§314\.4|Rule|examiner|mandatory|notif/i.test(c.consequence),
+    );
+    expect(grounded.length).toBe(Object.keys(COORDINATION_BY_CODE).length);
   });
 
   it('routes designation and contract authority to ownership, training to HR', () => {
@@ -138,23 +141,6 @@ describe('labels', () => {
   it('labels every enum value', () => {
     for (const owner of OWNERS) expect(OWNER_LABEL[owner]).toBeTruthy();
     for (const effort of EFFORTS) expect(EFFORT_LABEL[effort]).toBeTruthy();
-    for (const vendor of VENDORS) {
-      if (vendor) expect(VENDOR_LABEL[vendor]).toBeTruthy();
-    }
     for (const horizon of [30, 60, 90] as const) expect(HORIZON_LABEL[horizon]).toBeTruthy();
-  });
-});
-
-describe('participantsLine', () => {
-  it('says so explicitly when no outside party is needed', () => {
-    expect(participantsLine(COORDINATION_BY_CODE.q1_1)).toBe(
-      'Dealer principal / owner (internal — no outside party required)'
-    );
-  });
-
-  it('names the outside party when one must participate', () => {
-    expect(participantsLine(COORDINATION_BY_CODE.q4_1)).toBe(
-      'IT provider / MSP, with DMS vendor'
-    );
   });
 });

@@ -12,9 +12,9 @@ import { getApplicability, applicableRequirements } from "@shared/applicability"
 import {
   EFFORT_LABEL,
   HORIZON_LABEL,
+  OWNER_LABEL,
   getCoordination,
   horizonFor,
-  participantsLine,
 } from "@shared/coordination";
 import { priorityForWeight } from "@shared/task-derivation";
 
@@ -229,7 +229,7 @@ export default function Summary() {
                           <>
                             <p className="mt-2 text-sm text-slate-300">
                               <span className="font-semibold text-slate-200">Accountable: </span>
-                              {participantsLine(coordination)}
+                              {OWNER_LABEL[coordination.owner]}
                             </p>
                             <p className="text-sm text-slate-300">
                               <span className="font-semibold text-slate-200">Proof of completion: </span>

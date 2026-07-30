@@ -10,9 +10,9 @@ import { REQUIREMENT_CATALOG, REQUIREMENT_GUIDANCE } from "./requirements.ts";
 import {
   EFFORT_LABEL,
   HORIZON_LABEL,
+  OWNER_LABEL,
   getCoordination,
   horizonFor,
-  participantsLine,
 } from "./coordination.ts";
 import { priorityForWeight } from "./task-derivation.ts";
 import type { AnswerValue } from "./controls.ts";
@@ -222,8 +222,7 @@ function triggeringAnswerLabel(gap: DerivedGap): string {
 
 /**
  * Write one gap as an explainable, ACTIONABLE block: citation + triggering answer + why + fix,
- * then the coordination facts — who is accountable, who else must participate, how long it takes,
- * and what artifact closes it.
+ * then the coordination facts — who is accountable, how long it takes, and what artifact closes it.
  *
  * The coordination lines are what separate a report that gets executed from one that gets filed.
  * A finding with a citation but no owner is the failure mode this product exists to fix, so it
@@ -245,7 +244,7 @@ function writeGapDetail(w: PdfWriter, gap: DerivedGap, critical: boolean) {
   if (guidance?.fix) {
     w.text(`Fix: ${guidance.fix}`, { indent: 22, size: 9, color: SLATE });
   }
-  w.text(`Accountable: ${participantsLine(coordination)}`, { indent: 22, size: 9, color: SLATE });
+  w.text(`Accountable: ${OWNER_LABEL[coordination.owner]}`, { indent: 22, size: 9, color: SLATE });
   w.text(`Proof of completion: ${coordination.proof}`, { indent: 22, size: 9, color: SLATE });
   w.text(
     `Effort: ${EFFORT_LABEL[coordination.effort]} · Target: ${HORIZON_LABEL[horizonFor(priorityForWeight(gap.weight), coordination.effort)].toLowerCase()}`,

@@ -8,7 +8,7 @@
 import { describe, it, expect } from 'vitest';
 import { deriveAssessmentFromAnswers } from '@shared/derivation';
 import { REQUIREMENT_CATALOG } from '@shared/requirements';
-import { getCoordination, horizonFor, participantsLine } from '@shared/coordination';
+import { OWNER_LABEL, getCoordination, horizonFor } from '@shared/coordination';
 import {
   deriveTasksFromControls,
   priorityForWeight,
@@ -71,7 +71,7 @@ describe('remediation plan over the real catalog', () => {
 
   it('gives every planned item an owner, a proof artifact, and a consequence', () => {
     for (const { gap, coordination } of plan(answers)) {
-      expect(participantsLine(coordination), gap.requirementCode).toMatch(/\S/);
+      expect(OWNER_LABEL[coordination.owner], gap.requirementCode).toMatch(/\S/);
       expect(coordination.proof, gap.requirementCode).toMatch(/\S/);
       expect(coordination.consequence, gap.requirementCode).toMatch(/\S/);
     }

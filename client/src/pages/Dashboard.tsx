@@ -2,7 +2,7 @@ import { Button } from "@/components/ui/button";
 import { SessionDataError } from "@/components/SessionDataError";
 import { Card } from "@/components/ui/card";
 import { Progress } from "@/components/ui/progress";
-import { AlertTriangle, CheckCircle2, AlertCircle, TrendingUp, Loader2, FileText, ListChecks, ShieldCheck, Paperclip, Building2, Clock, UserCheck } from "lucide-react";
+import { AlertTriangle, CheckCircle2, AlertCircle, TrendingUp, Loader2, FileText, ListChecks, ShieldCheck, Paperclip, Clock, UserCheck } from "lucide-react";
 import { useLocation } from "wouter";
 import { useAuth } from "@/hooks/useAuth";
 import { trpc } from "@/lib/trpc";
@@ -26,10 +26,9 @@ import {
 } from "@shared/applicability";
 import {
   EFFORT_LABEL,
-  VENDOR_LABEL,
+  OWNER_LABEL,
   getCoordination,
   horizonFor,
-  participantsLine,
 } from "@shared/coordination";
 import { priorityForWeight } from "@shared/task-derivation";
 
@@ -351,8 +350,8 @@ export default function Dashboard() {
         {/* The next 30 days — the coordination answer.
             Compliance programs stall as a coordination failure, not a knowledge failure: the GM
             says it belongs to IT, IT says the DMS vendor owns it, and the gap stays open. This
-            card names the accountable role, the outside party who must participate, and the
-            artifact that proves closure — for the small set of work that genuinely fits in 30
+            card names the accountable role and the artifact that proves closure — for the small
+            set of work that genuinely fits in 30
             days. Sequencing is deterministic (shared/coordination.ts), never generated. */}
         {answeredCount > 0 && (
           <Card className="bg-slate-800 border-slate-700 p-8 mb-12">
@@ -399,7 +398,7 @@ export default function Dashboard() {
                         <dl className="space-y-1.5 text-sm">
                           <div className="flex flex-wrap gap-x-2">
                             <dt className="font-semibold text-slate-200">Who acts:</dt>
-                            <dd className="text-slate-300">{participantsLine(coordination)}</dd>
+                            <dd className="text-slate-300">{OWNER_LABEL[coordination.owner]}</dd>
                           </div>
                           <div className="flex flex-wrap gap-x-2">
                             <dt className="font-semibold text-slate-200">Proof it is done:</dt>
@@ -416,17 +415,10 @@ export default function Dashboard() {
                             <Clock size={12} aria-hidden="true" />
                             {EFFORT_LABEL[coordination.effort]}
                           </span>
-                          {coordination.vendor ? (
-                            <span className="inline-flex items-center gap-1 rounded border border-sky-800 bg-sky-950/50 px-2 py-0.5 text-sky-300">
-                              <Building2 size={12} aria-hidden="true" />
-                              Needs {VENDOR_LABEL[coordination.vendor]}
-                            </span>
-                          ) : (
-                            <span className="inline-flex items-center gap-1 rounded border border-slate-600 bg-slate-900/60 px-2 py-0.5 text-slate-400">
-                              <UserCheck size={12} aria-hidden="true" />
-                              Internal only
-                            </span>
-                          )}
+                          <span className="inline-flex items-center gap-1 rounded border border-slate-600 bg-slate-900/60 px-2 py-0.5 text-slate-300">
+                            <UserCheck size={12} aria-hidden="true" />
+                            {OWNER_LABEL[coordination.owner]}
+                          </span>
                         </div>
                       </div>
                     </div>
