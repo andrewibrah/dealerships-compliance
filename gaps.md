@@ -2,7 +2,7 @@
 
 - **Repo:** `dealerships-compliance` (FTC Safeguards Rule compliance SaaS for franchised auto dealers)
 - **Stack detected:** TypeScript monorepo. React 19 + Vite + Tailwind 4 + shadcn/radix + wouter (client); tRPC 11 over Express (local dev) and Supabase Deno Edge Functions (production); Drizzle ORM over Supabase Postgres; Supabase Auth (email/password); Stripe billing; pdf-lib document generation; Vitest tests; GitHub Pages (frontend) + Supabase (API) deploy.
-- **Analysis date:** 2026-07-21 (last updated 2026-07-27 after the Phases 1–3 front-facing build)
+- **Analysis date:** 2026-07-21 (last updated 2026-07-29 after the coordination-layer session)
 - **PRD version:** `prd.md`, uncommitted working copy as of 2026-07-21 (68 numbered requirements, groups A–M, with a flagged "critical path to first paying dealer").
 - **Method:** Every status below cites a real `path:line`. Anything not locatable in code is **Missing**, never assumed.
 
@@ -16,13 +16,41 @@ What remains is chiefly **structural rather than functional**: the regulation is
 
 | Severity | Count | Themes |
 |---|---|---|
-| **Critical** | 2 | Audit trail #34/#51 is deployed with DB enforcement validated; authenticated user-flow/Data-API validation remains. *(MFA #47 closed — see `.claude/tasks/done/0001-mfa-enforcement.md`.)* |
+| **Critical** | 2 | Audit trail #34/#51 is deployed with DB enforcement validated. **Advanced 2026-07-28:** a real authenticated production flow wrote and verified an `audit_log` row (login via `createContext`), so the authenticated-**write** half is now evidenced; a tenant-scoped Data-API **read** remains. *(MFA #47 closed — see `.claude/tasks/done/0001-mfa-enforcement.md`.)* |
 | **High** | 3 | law-as-data (#5/#6), RLS/tenant isolation (#46 — policies live, flag-gated), multi-tenant groups (#2) |
 | **Medium** | ~19 | Recurrence engine (#35/#43), RBAC views (#42), encryption posture doc (#54), retention/deletion (#56), attestation flow (#29), onboarding (#37), … |
 | **Low** | ~26 | Crosswalks (#8), DMS connectors (#59), SSO (#47-part), eval harness (#63), observability (#67), separate repos (#65), … |
 | **Implemented** | 21 | Scope lock (#1), object model (#3), applicability (#7), adaptive/LLM interview (#10/#11), explainability (#19), risk assessment (#20), WISP (#21), policy generators (#22), IRP (#23), tasks + board (#24/#40), evidence checklist (#25), doc lifecycle (#26), teaching content (#27), signature output (#30), evidence repo + linking (#31/#32), posture history (#33), examiner package (#36), dashboard (#38), interview UX (#39), rule engine (#49), white-label (#45), responsive (#44), trust-boundary disclaimer (#4) |
 
 **The single most important structural finding (now CLOSED, 2026-07-27):** the app modeled compliance as `compliance_answers.answers` JSONB blobs keyed by question id. PRD #3's object model was modeled on 2026-07-22, and the **JSONB→Control cutover is now wired** (`2d09da1`): `compliance.saveSection`/`saveAnswer` upsert derived `Control` rows in both runtimes, and `shared/derivation.ts` — proven byte-equivalent to `shared/scoring.ts` by `server/derivation.test.ts` — is the gap/citation spine. Everything it blocked (citations #19, risk assessment #20, IRP #23, tasks #24, evidence #31/#32, checklist #25, posture #33) shipped in the same session and is merged to `main`.
+
+**Coordination layer (2026-07-29) — out-of-PRD, strategy-driven.** The product answered *what is
+broken* and *why it matters* but never *who owns it, what proves it closed, or what fits in 30
+days* — derived tasks shipped with `owner: ''`. `shared/coordination.ts` now carries authored
+metadata for all 45 requirements (accountable owner role, effort, proof-of-closure artifact,
+regulatory consequence) plus a deterministic 30/60/90 sequencer. It reaches the task board, the
+Dashboard, `/summary`, **and every generated PDF** via `writeGapDetail` — the single renderer behind
+all seven artifacts. The Dashboard's penalty banner was replaced by a calibrated posture statement
+(confirmed / open / genuinely unknown), and Home/Pricing were repositioned onto uncertainty
+reduction and the reassessment cycle, dropping two claims the code does not support (email
+reminders, priority support). Shipped as `34b4bb5`, `15b2c21`, `2c471a3`, `0b86b62`; 365 tests.
+**Not PRD-numbered scope** — it deepens #24/#30/#40 rather than closing a new row.
+**Review status: NEEDS WORK** — self-authored; the 45 authored `proof`/`consequence` strings now
+print in customer-facing PDFs and have not been read by a human. Detail:
+`.claude/tasks/done/2026-07-29-1330-coordination-layer.md`.
+
+**Platform/reliability status (2026-07-28).** A full audit + repair of the Supabase↔webapp
+communication layer shipped (`3d39a2f`). The production connection leak is fixed: `getDb()`
+constructed a Postgres client per call and never released it (~7 leaked per dashboard load), which
+exhausted the database at ~9 requests. Both runtimes now share one pooled client via
+`shared/db-options.ts` (transaction-mode pooler through **`APP_DB_URL`** — the platform-injected
+`SUPABASE_DB_URL` cannot be overridden). Measured on the deployed Edge Function: **0/30 concurrent
+calls succeeded before, 240/240 after**, with connection count flat. Also fixed: a data-layer 500 no
+longer signs a user out (8 page guards now branch on session, not on `auth.me`), React Query
+staleness, and two N+1 write paths (45 sequential round-trips per save → 1). Deep-link 404s on
+GitHub Pages were **deliberately accepted** and documented in CLAUDE.md with required uptime-probe
+targets. None of this is PRD-numbered scope — it is the platform underneath it. Detail:
+`.claude/tasks/done/2026-07-27-1400-supabase-comms-audit.md`.
 
 **Deployment status (2026-07-27):** migrations `0001`–`0012` are applied to the linked Supabase project and reconciled in `supabase_migrations.schema_migrations` (`supabase migration list --linked` shows nothing pending); 17 tables; RLS enabled+forced with a policy on every tenant table; both storage buckets (`documents`, `evidence`) are **private**.
 
@@ -81,7 +109,7 @@ Status legend: **Implemented** / **Partial** / **Missing** / **Divergent**. Seve
 |---|---|---|---|---|---|---|
 | 22 | Policy/procedure generation (access control, encryption, MFA, disposal, change mgmt) | Implemented (2026-07-27) | `shared/policy-templates.ts` (`POLICY_DEFINITIONS`) + `generatePolicy` (`shared/pdf-generator.ts`) + `pdf.generatePolicy` both runtimes; creates a draft `policies` row + PDF; cites (c)(1)/(c)(3)/(c)(5)/(c)(6)/(c)(7) | Posture is honest — no/partial/unanswered never render as "in place" | — | Add more policy types as needed |
 | 23 ★ | Incident Response Plan generator (§314.4(h)) | Implemented (2026-07-27) | `shared/incident-response.ts` covers all seven §314.4(h) elements + the FTC breach-notification duty at **§314.4(j)** (≥500 consumers, 30 days); `pdf.generateIncidentResponsePlan` both runtimes, paid-gated | None | — | Keep; §314.5 is only the effective-date section — never cite it for the duty |
-| 24 ★ | Remediation roadmap: gaps → prioritized, assigned, dated tasks | Implemented (2026-07-27) | `shared/task-derivation.ts` (open control → task, priority from weight, **idempotent** on `controlId`) + `tasks.deriveFromControls` both runtimes, audited; `/tasks` board with owner/due/status | None | — | Keep; wire evidence-attach in place next |
+| 24 ★ | Remediation roadmap: gaps → prioritized, assigned, dated tasks | Implemented (2026-07-27; **coordination layer added 2026-07-29**) | `shared/task-derivation.ts` (open control → task, priority from weight, **idempotent** on `controlId`) + `tasks.deriveFromControls` both runtimes, audited. `shared/coordination.ts` now supplies an accountable owner role (never `owner: ''`), an effort estimate, the artifact that proves closure, and the regulatory consequence of delay; `horizonFor()` sequences work into 30/60/90 (effort-dominated — worst case 15/23/7) | None | — | Keep; wire evidence-attach in place next |
 | 25 | Evidence-request checklist auto-generated per open control | Implemented (2026-07-27) | `shared/evidence-checklist.ts` — one grounded request per open control (citation + `REQUIREMENT_GUIDANCE.fix`), applicability-aware; rendered on `/evidence` | None | — | Keep |
 | 26 | Document lifecycle: versioning, draft→review→approve, e-sign, immutable "adopted on" | Implemented (2026-07-27) | `shared/policy-lifecycle.ts` state machine (draft→in_review→approved→adopted, archived from any non-adopted; adopted terminal) + `policies.transition` both runtimes, audited; `adoptedAt` set-once and unreachable via `create`/`update` (`.strict()`, `server/policy-guard.test.ts`); `/policies` viewer | No e-signature | Low | Add e-sign if a pilot requires it |
 
@@ -92,7 +120,7 @@ Status legend: **Implemented** / **Partial** / **Missing** / **Divergent**. Seve
 | 27 | Per-control plain-language "why this exists / what breach it prevents" | Implemented (2026-07-27) | `REQUIREMENT_GUIDANCE` (`shared/requirements.ts:141`) — authored `whyItMatters` + `fix` for all 45; surfaced on Dashboard gaps, `/summary`, `/architecture`, `/evidence` checklist, and in PDFs | None (authored content, never LLM) | — | Keep |
 | 28 | Role-based training modules (QI vs front-desk vs F&I) | Missing | none | No training | Low | Defer (post-pilot moat) |
 | 29 | Staff attestation/acknowledgment tracking (§314.4(e)) | Partial | `attestations` entity + audited CRUD both runtimes (`server/routers.ts:930-1000`) | Entity + CRUD exist; still **zero client UI** (send → attest → record) | Med | Build the collection flow — design in NextWork Phase 4.4 |
-| 30 ★ | Signature 10-minute output ("here's your risk, why it matters, here's the fix") | Implemented (2026-07-27) | `/summary` one-pager (`client/src/pages/Summary.tsx`) — top gaps as risk → why → fix, printable; same grounded spine as the Dashboard | None | — | Keep |
+| 30 ★ | Signature 10-minute output ("here's your risk, why it matters, here's the fix") | Implemented (2026-07-27; **extended 2026-07-29**) | `/summary` one-pager (`client/src/pages/Summary.tsx`) — top gaps as risk → why → fix → **who is accountable → what proves it closed → effort/target horizon**, printable; same grounded spine as the Dashboard | None | — | Keep |
 
 ### G. Librarian node
 
@@ -101,7 +129,7 @@ Status legend: **Implemented** / **Partial** / **Missing** / **Divergent**. Seve
 | 31 ★ | Evidence repository (encrypted object storage) | Implemented (2026-07-27) | Private `evidence` bucket created; `evidence.getUploadUrl` mints a **server-derived** scoped key `evidence/<dealershipId>/<uuid>-<sanitized>` (path-traversal tested); `/evidence` upload + download via signed URLs; `evidence.create` rejects a path outside the tenant prefix | None | — | Keep; Supabase-managed encryption at rest |
 | 32 | Evidence-to-control linking (one artifact → many controls) | Implemented (2026-07-27) | `evidence_controls` join + `evidence.linkControl`/`listForControl`, surfaced per open control on `/evidence`; composite `(dealership_id, control_id)` FK added in migration `0008` | None | — | Keep |
 | 33 ★ | Continuous posture tracking (state over time) | Implemented (2026-07-27) | `posture_snapshots` (migration `0011`, RLS in-migration) written on save in both runtimes with a dedup rule (only when the overall score changes), audited; Dashboard sparkline (`role="img"` + aria-label) | None | — | Keep |
-| 34 ★ | Append-only audit trail of every change (who/what/when) | Partial (deployed 2026-07-21) | `audit_log` (`drizzle/schema.ts`) + remote migration `20260721172940_audit_log`; append-only triggers + SHA-256 chain validated transactionally as `service_role`; all three Edge Functions deployed; `shared/audit.ts` unit-tested | Real authenticated mutation and tenant-scoped Data-API read still need a user-flow smoke test | **Critical** | Run an authenticated mutation/read smoke test, then close — see `.claude/tasks/done/0003-audit-trail.md` |
+| 34 ★ | Append-only audit trail of every change (who/what/when) | Partial (deployed 2026-07-21; write-path evidenced 2026-07-28) | `audit_log` (`drizzle/schema.ts`) + remote migration `20260721172940_audit_log`; append-only triggers + SHA-256 chain validated transactionally as `service_role`; all three Edge Functions deployed; `shared/audit.ts` unit-tested | Authenticated **write** verified in prod 2026-07-28 (login audit row confirmed by query); tenant-scoped Data-API **read** still unverified | **Critical** | Run an authenticated mutation/read smoke test, then close — see `.claude/tasks/done/0003-audit-trail.md` |
 | 35 | Recurrence engine (annual RA, pen test, QI board report; auto-scheduled + nagged) | Missing | no scheduler; `server/email-service.ts` (Resend) defined but **never imported** | No recurrences/reminders | Med | Add scheduled recurrences + wire notifications |
 | 36 | Audit-ready export ("examiner package" / board report) | Implemented (2026-07-27) | `generateExaminerPackage` — cover + posture + document manifest + evidence index + a **real** audit-trail extract (`listAuditLog`, select-only, dealership-filtered; unit-tested for no fabrication); paid-gated both runtimes | Single PDF rather than a zip bundle (deliberate — no new dependency) | — | Add a zip bundle only if an examiner asks |
 
@@ -112,7 +140,7 @@ Status legend: **Implemented** / **Partial** / **Missing** / **Divergent**. Seve
 | 37 ★ | Onboarding that reaches first artifact fast | Partial | flow: `client/src/App.tsx:22-29` (Home→Signup→Wizard→Dashboard→Documents); dealership auto-created "My Dealership" (`server/routers.ts:20-30`) | No guided onboarding; profile is a stub | Med | Add a guided first-run that reaches a first artifact quickly |
 | 38 ★ | Dashboard: posture score, open gaps by severity, tasks, upcoming recurrences | Implemented (2026-07-27) | `client/src/pages/Dashboard.tsx` — score card, section grid, grounded priority gaps, open-task widget, posture trend, nav to summary/architecture/evidence | Upcoming recurrences still missing (depends on #35) | Med | Add the recurrence widget with #35 |
 | 39 | Interview UX: chat + inline forms hybrid | Implemented (2026-07-27) | Optional conversational mode in `client/src/pages/Wizard.tsx` displaying LLM-rephrased question text; structured radiogroup/forms remain the ONLY state writers; degrades to plain forms without a key | None | — | Keep the guardrail |
-| 40 | Task board with ownership, due dates, evidence-attach in place | Implemented (2026-07-27) | `client/src/pages/Tasks.tsx` — title/priority/status/owner/due with inline edit, "Generate tasks from gaps" | Evidence-attach from the task row not yet wired (evidence links to controls) | Low | Surface control-linked evidence on the task row |
+| 40 | Task board with ownership, due dates, evidence-attach in place | Implemented (2026-07-27; **re-shaped 2026-07-29**) | `client/src/pages/Tasks.tsx` — now a **Remediation Plan** grouped into 30/60/90-day horizons + Closed, each row carrying the accountable role, effort badge, proof-of-closure and consequence; inline status/owner/due edit retained | Evidence-attach from the task row not yet wired (evidence links to controls) | Low | Surface control-linked evidence on the task row |
 | 41 | Document viewer/editor with approval workflow | Implemented (2026-07-27) | `client/src/pages/Policies.tsx` shows status/version/adoptedAt with lifecycle actions via `policies.transition`; `/documents` lists + signs generated PDFs | No in-app editor (content is generated) | Low | Add editing only if dealers ask |
 | 42 | Role-scoped views (owner / QI / staff / auditor) | Missing | only `user`/`admin` roles (`drizzle/schema.ts:6`); `adminProcedure` defined but unused (`server/_core/trpc.ts:30`) | No compliance-role RBAC | Med | Add owner/QI/staff/auditor roles + scoped views |
 | 43 | Notifications + reminders (email/in-app) driven by recurrence | Missing | `server/email-service.ts` never imported; no in-app notifications | No live notifications | Low | Wire email-service to recurrence engine (#35) |
@@ -128,7 +156,7 @@ Status legend: **Implemented** / **Partial** / **Missing** / **Divergent**. Seve
 | 48 | LLM orchestration (routing, prompt/version mgmt, tool-calling) | Missing | `server/_core/llm.ts:143` is a single gpt-4o-mini chat wrapper, never called | No orchestration; unused wrapper | Low | Build when the LLM path is actually needed (#11/#30) |
 | 49 | Deterministic rule-engine service, separate from LLM | Implemented | `shared/scoring.ts` pure module, isolated from `llm.ts` | Cleanly separated (not a standalone service, but decoupled) | — | Keep the separation as LLM features land |
 | 50 | Document-generation service (templating → PDF/DOCX) | Partial | `shared/pdf-generator.ts` (PDF only) | No DOCX; not a discrete service | Low | Add DOCX later; keep in `shared/` |
-| 51 | Append-only audit-log service (separate store, tamper-evident) | Partial (deployed 2026-07-21) | DB-enforced append-only blocks UPDATE/DELETE/TRUNCATE as `service_role`; two-row SHA-256 `prev_hash→row_hash` chain validated and rolled back cleanly; Edge Functions active | Authenticated production-flow write/read smoke test remains | **Critical** | Complete the authenticated smoke test (see #34) |
+| 51 | Append-only audit-log service (separate store, tamper-evident) | Partial (deployed 2026-07-21) | DB-enforced append-only blocks UPDATE/DELETE/TRUNCATE as `service_role`; two-row SHA-256 `prev_hash→row_hash` chain validated and rolled back cleanly; Edge Functions active | Authenticated production write verified 2026-07-28; the tenant-scoped read half remains | **Critical** | Complete the authenticated smoke test (see #34) |
 | 52 | Async job/queue for long-running agent tasks | Missing | all synchronous (`supabase/functions/trpc/index.ts`) | No queue | Low | Defer until generation/sync is long-running |
 | 53 | Integration connectors behind a stable internal API | Missing | none | No connector layer | Low | Defer (depends on #59/#60) |
 

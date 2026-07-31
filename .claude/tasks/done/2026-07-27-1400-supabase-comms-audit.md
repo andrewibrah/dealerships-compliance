@@ -199,3 +199,63 @@ tradeoff in CLAUDE.md with the required probe targets: **`/` for the frontend an
 - Carryover 4 (edge secret typos) is **confirmed but not fixed**: `STRIPE_SECERT_KEY` (distinct
   stale value), `STRIPE_WEBHOOK_KEY` (exact duplicate of `STRIPE_WEBHOOK_SECRET`), `VITE_APP_URP`.
 - Carryovers 1–3 (independent branch audit, GitNexus licensing, Deno `zod` pin) **not started**.
+
+---
+
+## Outcome — SHIPPED, with a NEEDS WORK review verdict on 3 non-blocking items
+
+Committed by the user as `3d39a2f` ("supabase changes v"), pushed; working tree clean,
+`main == origin/main`. 22 files, +698/−146. No `.env` and no credential literals in the diff.
+
+**Both deploys verified live, not assumed:**
+- Edge: `trpc` / `stripe-webhook` / `handle-signup` deployed; `system.health` → 200.
+- Frontend: the deployed bundle `assets/index-DRzhyUu1.js` (801 KB) was fetched and grepped —
+  it contains `load your account`, `still signed in`, `refetchUser`, `staleTime`. The client-side
+  fixes are genuinely live, not merely built.
+
+### Session-review gate (run after the work, per CLAUDE.md)
+| # | Acceptance criterion | Verdict |
+|---|---|---|
+| 1 | 50+ calls all 200 | ✅ 240/240 across 4×60 concurrent |
+| 2 | Connection count flat | ✅ 38 under load → 13 baseline |
+| 3 | Forced 500 leaves session intact | ⚠️ code-verified only, never exercised |
+| 4 | Deep link 200 or documented decision | ✅ documented + probe targets |
+| 5 | Every fix has a number or a test | ⚠️ N+1 batching has neither |
+| 6 | No regressions | ✅ check / 283 tests / lint all clean |
+| 7 | Two-runtime parity | ✅ 49/49 identical export sets |
+| 8 | Tenant isolation not regressed | ✅⚠️ tests pass; reasoning not independently reviewed |
+
+**Verdict: NEEDS WORK** — three items, none blocking production, all carried into NextWork:
+1. Force a 500 and confirm the session survives (the reported symptom's fix is untested).
+2. Measure or test the batched writes (45 statements → 1 is arithmetic, not evidence).
+3. Independent review of the shared pooled client's tenant-isolation argument (no self-approval).
+
+### Bugs found + root cause (this session)
+1. **Connection leak (the reported Bug 2).** Root cause: `getDb()` constructed a `postgres()` client
+   per call and never released it, while `scoped()` — the obvious suspect — always did release.
+   13 exported functions used the leaking path, ~7 leaked clients per batched dashboard load.
+2. **A wrong premise in the handoff.** It directed transaction mode "because `prepare: false`".
+   Measurement showed the real constraint is `max` **sizing**: postgres.js stalls indefinitely
+   against transaction mode whenever a query waits for a connection. Root cause of the wrong
+   premise: `prepare: false` is necessary but not sufficient, and nobody had load-tested it.
+3. **Session mode looked correct locally and failed in production.** Root cause: a single local
+   process cannot surface Supavisor's project-wide `pool_size: 15` session-client cap; only the
+   many-isolate Edge runtime does. Cost one deploy + rollback. Lesson: pooler behaviour must be
+   measured on the deployed runtime, never inferred from a laptop.
+4. **Self-inflicted diagnostic dead end.** Killed load-test processes left orphaned backends that
+   poisoned the pool and made an early clean run look like a stall. Terminating them and re-running
+   from a clean pool was what separated the real defect from the artifact.
+5. **A false positive I nearly "fixed".** `Profile.tsx:61`'s cache-wide `utils.invalidate()` was
+   flagged as over-broad invalidation; reading it showed it is the **logout** path, deliberately
+   broad so the next account cannot see the prior tenant's cache. Narrowing it would have weakened
+   tenant isolation. Left as-is; the finding was retracted in the log rather than acted on.
+
+### Open threads (→ NextWork)
+1. The three punch-list items above.
+2. **Audit trail (#34/#51) evidence advanced but NOT closed.** An authenticated production flow did
+   write and verify a real `audit_log` row this session (login via `createContext`, confirmed by
+   `select count(*) … where actor_user_id = <test user>` → 1). That is a genuine authenticated
+   write, but it is *not* the full smoke test the gap asks for — a tenant-scoped Data-API **read**
+   was never exercised. Close it deliberately, don't assume.
+3. Load-test user `loadtest-1785213363@example.com` is permanent in prod (banned to 2126).
+4. Edge secret typos, Deno `zod` pin, GitNexus licensing, independent branch audit — all still open.
